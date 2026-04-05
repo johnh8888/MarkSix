@@ -1,0 +1,114 @@
+import { prisma } from "@/lib/prisma";
+import { describeSpecialNumber, formatNumber, inferYearFromIssue } from "@/lib/marksix";
+import { strategyMeta } from "@/lib/strategies";
+
+function parseJsonArray(text: string): number[] {
+  try {
+    return JSON.parse(text) as number[];
+  } catch {
+    return [];
+  }
+}
+
+export default async function HomePage() {
+  const latestDraw = await prisma.draw.findFirst({
+    orderBy: { drawDate: "desc" },
+  });
+
+  const latestPendingIssue = await prisma.predictionRun.findFirst({
+    where: { status: "PENDING" },
+    orderBy: [{ issueNo: "desc" }, { createdAt: "desc" }],
+    select: { issueNo: true },
+  });
+
+  const pendingRuns = latestPendingIssue
+    ? await prisma.predictionRun.findMany({
+        where: {
+          status: "PENDING",
+          issueNo: latestPendingIssue.issueNo,
+        },
+        include: { picks: { orderBy: { rank: "asc" } } },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
+
+  const latestIssueYear = latestDraw ? inferYearFromIssue(latestDraw.issueNo, latestDraw.drawDate.getUTCFullYear()) : null;
+
+  return (
+    <section className="stack">
+      <div className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">Vercel Special Number Predictor</p>
+          <h2>香港六合彩特别号码预测</h2>
+          <p className="lede">
+            历史数据优先读取 <code>Mark_Six.csv</code>，并可通过 Lottolyzer 与官方源自动补齐最新期次。
+            当前页面展示的是下一期特别号码候选池，而不是 6 个正码。
+          </p>
+        </div>
+
+        {latestDraw ? (
+          <div className="hero-card">
+            <p className="kv">最近一期</p>
+            <h3 className="issue-title">{latestDraw.issueNo}</h3>
+            <p className="kv compact-line">{latestDraw.drawDate.toISOString().slice(0, 10)}</p>
+            <p className="numbers-inline">
+              正码 {parseJsonArray(latestDraw.numbersJson).map(formatNumber).join(" ")}
+            </p>
+            {latestIssueYear ? (
+              <p className="special-chip">特别号 {describeSpecialNumber(latestDraw.specialNumber, latestIssueYear)}</p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="hero-card">
+            <p className="kv">暂无历史数据</p>
+            <p className="kv">先执行 <code>npm run bootstrap:history</code> 完成初始化。</p>
+          </div>
+        )}
+      </div>
+
+      {latestPendingIssue ? (
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Next Issue</p>
+            <h3 className="issue-title">{latestPendingIssue.issueNo}</h3>
+          </div>
+          <p className="kv section-copy">4 套特别号码方案均限制在 30 个候选以内，可直接用于复盘。</p>
+        </div>
+      ) : null}
+
+      <div className="grid">
+        {pendingRuns.map((run) => (
+          <article key={run.id} className="card">
+            <div className="card-head">
+              <h3>{strategyMeta[run.strategy as keyof typeof strategyMeta]?.name ?? run.strategy}</h3>
+              <span className="badge">{run.picks.length} 个候选</span>
+            </div>
+            <p className="kv">{strategyMeta[run.strategy as keyof typeof strategyMeta]?.description}</p>
+            <p className="kv">目标期号: {run.issueNo}</p>
+            <div className="numbers">
+              {run.picks.map((pick) => (
+                <span key={pick.id} className="ball" title={pick.reason}>
+                  {String(pick.number).padStart(2, "0")}
+                </span>
+              ))}
+            </div>
+            <div className="reason-list">
+              {run.picks.slice(0, 6).map((pick) => (
+                <p key={pick.id} className="kv">
+                  {pick.rank}. {String(pick.number).padStart(2, "0")} - {pick.reason}
+                </p>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {pendingRuns.length === 0 ? (
+        <div className="empty-state">
+          <p>还没有待开奖预测结果。</p>
+          <p className="kv">可调用 <code>POST /api/predictions/generate</code> 或先执行一次同步任务。</p>
+        </div>
+      ) : null}
+    </section>
+  );
+}
