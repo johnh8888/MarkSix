@@ -210,7 +210,7 @@ export default async function HistoryPage({
                     <tr key={draw.id}>
                       <td>{draw.issueNo}</td>
                       <td>{formatDate(draw.drawDate)}</td>
-                      <td>
+                      <td className="history-main-cell">
                         <div className="history-balls">
                           {numbers.map((number) => (
                             <span key={number} className={`history-ball ${waveClassName(number)}`}>
@@ -219,7 +219,7 @@ export default async function HistoryPage({
                           ))}
                         </div>
                       </td>
-                      <td>
+                      <td className="history-special-cell">
                         <span className={`history-ball history-special ${waveClassName(draw.specialNumber)}`}>
                           {describeSpecialNumber(draw.specialNumber, year)}
                         </span>

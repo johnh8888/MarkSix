@@ -52,6 +52,7 @@ export default async function HomePage() {
     <section className="stack">
       <div className="hero">
         <div className="hero-copy">
+          <p className="eyebrow">Vercel Special Number Predictor</p>
           <h2>香港六合彩特别号码预测</h2>
           <div className="scheme-list">
             <p className="scheme-item">
@@ -156,9 +157,13 @@ export default async function HomePage() {
             </div>
             <div className="reason-list">
               {run.picks.slice(0, 6).map((pick) => (
-                <p key={pick.id} className="kv">
-                  {pick.rank}. {String(pick.number).padStart(2, "0")} - {pick.reason}
-                </p>
+                <div key={pick.id} className="reason-item">
+                  <span className="reason-order">{pick.rank}</span>
+                  <span className={`reason-ball ${waveClassName(pick.number)}`}>
+                    {String(pick.number).padStart(2, "0")}
+                  </span>
+                  <p className="kv reason-copy">{pick.reason}</p>
+                </div>
               ))}
             </div>
           </article>
