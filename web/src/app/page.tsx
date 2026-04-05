@@ -44,8 +44,6 @@ export default async function HomePage() {
           <p className="eyebrow">Vercel Special Number Predictor</p>
           <h2>香港六合彩特别号码预测</h2>
           <p className="lede">
-            历史数据优先读取 <code>Mark_Six.csv</code>，并可通过 Lottolyzer 与官方源自动补齐最新期次。
-            当前页面展示的是下一期特别号码候选池，而不是 6 个正码。
           </p>
         </div>
 
