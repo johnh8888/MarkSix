@@ -42,7 +42,6 @@ function loadLocalSeedRecords(): CsvDrawRecord[] {
   const candidates = [
     configured,
     "./Mark_Six.csv",
-    "./web/Mark_Six.csv",
   ].filter((value, index, arr): value is string => Boolean(value) && arr.indexOf(value) === index);
 
   let lastError: Error | null = null;
