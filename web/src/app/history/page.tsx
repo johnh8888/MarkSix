@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { describeSpecialNumber, formatNumber, inferYearFromIssue } from "@/lib/marksix";
+import { ALL_NUMBERS, describeSpecialNumber, formatNumber, getWaveColor, inferYearFromIssue } from "@/lib/marksix";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const PAGE_SIZE = 50;
+type SortMode = "rate" | "number";
 
 function parseJsonArray(text: string): number[] {
   try {
@@ -26,8 +27,31 @@ function parsePage(value?: string): number {
   return page;
 }
 
-function buildPageHref(page: number): string {
-  return page <= 1 ? "/history" : `/history?page=${page}`;
+function parseSort(value?: string): SortMode {
+  return value === "number" ? "number" : "rate";
+}
+
+function buildHistoryHref(page: number, sort: SortMode): string {
+  const params = new URLSearchParams();
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+  if (sort !== "rate") {
+    params.set("sort", sort);
+  }
+  const query = params.toString();
+  return query ? `/history?${query}` : "/history";
+}
+
+function waveClassName(number: number): string {
+  const wave = getWaveColor(number);
+  if (wave === "红波") {
+    return "ball-red";
+  }
+  if (wave === "蓝波") {
+    return "ball-blue";
+  }
+  return "ball-green";
 }
 
 export default async function HistoryPage({
@@ -37,9 +61,11 @@ export default async function HistoryPage({
 }) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const pageParam = resolvedSearchParams.page;
+  const sortParam = resolvedSearchParams.sort;
   const currentPage = parsePage(Array.isArray(pageParam) ? pageParam[0] : pageParam);
+  const sortMode = parseSort(Array.isArray(sortParam) ? sortParam[0] : sortParam);
 
-  const [totalDraws, oldestDraw, newestDraw] = await Promise.all([
+  const [totalDraws, oldestDraw, newestDraw, allSpecials] = await Promise.all([
     prisma.draw.count(),
     prisma.draw.findFirst({
       orderBy: { drawDate: "asc" },
@@ -48,6 +74,9 @@ export default async function HistoryPage({
     prisma.draw.findFirst({
       orderBy: { drawDate: "desc" },
       select: { issueNo: true, drawDate: true },
+    }),
+    prisma.draw.findMany({
+      select: { specialNumber: true },
     }),
   ]);
 
@@ -67,6 +96,27 @@ export default async function HistoryPage({
     { length: pageWindowEnd - pageWindowStart + 1 },
     (_, index) => pageWindowStart + index,
   );
+  const specialCounts = new Map<number, number>(ALL_NUMBERS.map((number) => [number, 0]));
+
+  for (const row of allSpecials) {
+    specialCounts.set(row.specialNumber, (specialCounts.get(row.specialNumber) ?? 0) + 1);
+  }
+
+  const specialStats = ALL_NUMBERS.map((number) => {
+    const count = specialCounts.get(number) ?? 0;
+    const percentage = totalDraws === 0 ? 0 : (count / totalDraws) * 100;
+
+    return {
+      number,
+      count,
+      percentage,
+    };
+  }).sort((a, b) => {
+    if (sortMode === "number") {
+      return a.number - b.number;
+    }
+    return b.percentage - a.percentage || b.count - a.count || a.number - b.number;
+  });
 
   return (
     <section className="stack">
@@ -96,6 +146,42 @@ export default async function HistoryPage({
         </article>
       </div>
 
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h3>特别号码出现百分比</h3>
+            <p className="kv">以当前数据库全部 {totalDraws} 期历史为基准，统计 1 - 49 每个号码作为特别号的出现次数与占比。</p>
+          </div>
+          <div className="toggle-group">
+            <a
+              href={buildHistoryHref(safePage, "rate")}
+              className={`toggle-link ${sortMode === "rate" ? "is-active" : ""}`}
+              aria-current={sortMode === "rate" ? "true" : undefined}
+            >
+              按占比排序
+            </a>
+            <a
+              href={buildHistoryHref(safePage, "number")}
+              className={`toggle-link ${sortMode === "number" ? "is-active" : ""}`}
+              aria-current={sortMode === "number" ? "true" : undefined}
+            >
+              按号码排序
+            </a>
+          </div>
+        </div>
+        <div className="special-stat-grid">
+          {specialStats.map((item) => (
+            <article key={item.number} className="special-stat-card">
+              <div className="special-stat-top">
+                <span className={`ball ${waveClassName(item.number)}`}>{formatNumber(item.number)}</span>
+                <strong>{item.percentage.toFixed(2)}%</strong>
+              </div>
+              <p className="kv">出现次数: {item.count}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+
       {latestDraws.length > 0 ? (
         <div className="card">
           <div className="card-head">
@@ -113,7 +199,6 @@ export default async function HistoryPage({
                   <th>日期</th>
                   <th>正码</th>
                   <th>特别号</th>
-                  <th>来源</th>
                 </tr>
               </thead>
               <tbody>
@@ -128,15 +213,16 @@ export default async function HistoryPage({
                       <td>
                         <div className="history-balls">
                           {numbers.map((number) => (
-                            <span key={number} className="history-ball">
+                            <span key={number} className={`history-ball ${waveClassName(number)}`}>
                               {formatNumber(number)}
                             </span>
                           ))}
                         </div>
                       </td>
-                      <td>{describeSpecialNumber(draw.specialNumber, year)}</td>
                       <td>
-                        <span className="source-chip">{draw.source ?? "-"}</span>
+                        <span className={`history-ball history-special ${waveClassName(draw.specialNumber)}`}>
+                          {describeSpecialNumber(draw.specialNumber, year)}
+                        </span>
                       </td>
                     </tr>
                   );
@@ -147,7 +233,7 @@ export default async function HistoryPage({
 
           <div className="pagination">
             <a
-              href={safePage > 1 ? buildPageHref(safePage - 1) : undefined}
+              href={safePage > 1 ? buildHistoryHref(safePage - 1, sortMode) : undefined}
               className={`page-link ${safePage <= 1 ? "is-disabled" : ""}`}
               aria-disabled={safePage <= 1}
             >
@@ -158,7 +244,7 @@ export default async function HistoryPage({
               {visiblePages.map((page) => (
                 <a
                   key={page}
-                  href={buildPageHref(page)}
+                  href={buildHistoryHref(page, sortMode)}
                   className={`page-link ${page === safePage ? "is-active" : ""}`}
                   aria-current={page === safePage ? "page" : undefined}
                 >
@@ -168,7 +254,7 @@ export default async function HistoryPage({
             </div>
 
             <a
-              href={safePage < totalPages ? buildPageHref(safePage + 1) : undefined}
+              href={safePage < totalPages ? buildHistoryHref(safePage + 1, sortMode) : undefined}
               className={`page-link ${safePage >= totalPages ? "is-disabled" : ""}`}
               aria-disabled={safePage >= totalPages}
             >

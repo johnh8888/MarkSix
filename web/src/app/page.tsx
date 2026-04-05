@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { describeSpecialNumber, formatNumber, inferYearFromIssue } from "@/lib/marksix";
+import { describeSpecialNumber, formatNumber, getWaveColor, inferYearFromIssue } from "@/lib/marksix";
 import { strategyMeta } from "@/lib/strategies";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +11,17 @@ function parseJsonArray(text: string): number[] {
   } catch {
     return [];
   }
+}
+
+function waveClassName(number: number): string {
+  const wave = getWaveColor(number);
+  if (wave === "红波") {
+    return "ball-red";
+  }
+  if (wave === "蓝波") {
+    return "ball-blue";
+  }
+  return "ball-green";
 }
 
 export default async function HomePage() {
@@ -26,13 +37,13 @@ export default async function HomePage() {
 
   const pendingRuns = latestPendingIssue
     ? await prisma.predictionRun.findMany({
-        where: {
-          status: "PENDING",
-          issueNo: latestPendingIssue.issueNo,
-        },
-        include: { picks: { orderBy: { rank: "asc" } } },
-        orderBy: { createdAt: "asc" },
-      })
+      where: {
+        status: "PENDING",
+        issueNo: latestPendingIssue.issueNo,
+      },
+      include: { picks: { orderBy: { rank: "asc" } } },
+      orderBy: { createdAt: "asc" },
+    })
     : [];
 
   const latestIssueYear = latestDraw ? inferYearFromIssue(latestDraw.issueNo, latestDraw.drawDate.getUTCFullYear()) : null;
@@ -41,7 +52,6 @@ export default async function HomePage() {
     <section className="stack">
       <div className="hero">
         <div className="hero-copy">
-          <p className="eyebrow">Vercel Special Number Predictor</p>
           <h2>香港六合彩特别号码预测</h2>
           <div className="scheme-list">
             <p className="scheme-item">
@@ -57,7 +67,7 @@ export default async function HomePage() {
               重点关注长遗漏、低热度但具备回补条件的特别号码。
             </p>
             <p className="scheme-item">
-              <strong>其他方案：</strong>
+              <strong>综合方案：</strong>
               综合生肖、冷热、波色、分区与转移关系，形成平衡型特别号候选池。
             </p>
           </div>
@@ -86,12 +96,47 @@ export default async function HomePage() {
       {latestPendingIssue ? (
         <div className="section-head">
           <div>
-            <p className="eyebrow">Next Issue</p>
-            <h3 className="issue-title">{latestPendingIssue.issueNo}</h3>
+            <h3 className="issue-title">下期预测：{latestPendingIssue.issueNo}</h3>
           </div>
           <p className="kv section-copy">4 套特别号码方案均限制在 30 个候选以内，可直接用于复盘。</p>
         </div>
       ) : null}
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h3>指标说明</h3>
+            <p className="kv">页面里出现的分值都是模型内部的相对强弱指标，用来做排序参考，不等于真实开奖概率。</p>
+          </div>
+          <span className="badge">参数解释</span>
+        </div>
+        <div className="metric-grid">
+          <article className="metric-card">
+            <strong>热度</strong>
+            <p className="kv">某号码或某生肖在最近历史中特别号出现得有多活跃，数值越高表示近期越常见。</p>
+          </article>
+          <article className="metric-card">
+            <strong>转移</strong>
+            <p className="kv">根据历史期次节奏，上一种状态过后接着出现该号码或生肖的相对强度，不是百分比概率。</p>
+          </article>
+          <article className="metric-card">
+            <strong>遗漏</strong>
+            <p className="kv">该号码或生肖距离上一次作为特别号出现已经隔了多久，越高通常代表越久没出。</p>
+          </article>
+          <article className="metric-card">
+            <strong>综合分</strong>
+            <p className="kv">把热度、遗漏、转移、波色、分区和正码联动等指标加权后的总分，用来给候选号排序。</p>
+          </article>
+          <article className="metric-card">
+            <strong>主号联动</strong>
+            <p className="kv">某号码近期在正码 6 个号码中出现得有多频繁，用来观察它与特别号的联动倾向。</p>
+          </article>
+          <article className="metric-card">
+            <strong>波色 / 分区</strong>
+            <p className="kv">波色是红波、蓝波、绿波；分区是 1-10、11-20 等区段，用来衡量近期结构是否失衡。</p>
+          </article>
+        </div>
+      </div>
 
       <div className="grid">
         {pendingRuns.map((run) => (
@@ -104,7 +149,7 @@ export default async function HomePage() {
             <p className="kv">目标期号: {run.issueNo}</p>
             <div className="numbers">
               {run.picks.map((pick) => (
-                <span key={pick.id} className="ball" title={pick.reason}>
+                <span key={pick.id} className={`ball ${waveClassName(pick.number)}`} title={pick.reason}>
                   {String(pick.number).padStart(2, "0")}
                 </span>
               ))}

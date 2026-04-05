@@ -239,7 +239,7 @@ export const strategyMeta: Record<StrategyId, { name: string; description: strin
     limit: 18,
   },
   knowledge_mix_v1: {
-    name: "其他方案",
+    name: "综合方案",
     description: "融合热度、冷门、生肖、波色、分区和主号联动的综合方案",
     limit: 20,
   },
