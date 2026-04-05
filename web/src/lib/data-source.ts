@@ -83,9 +83,12 @@ export async function loadDrawRecords(): Promise<CsvDrawRecord[]> {
   const lottolyzerRequired = (process.env.LOTTOLYZER_SOURCE_REQUIRED || "").trim() === "true";
 
   if (provider === "csv") {
-    const local = await loadOptionalSource(loadLocalSeedRecords, true);
     const remote = await loadOptionalSource(loadRemoteCsvRecords, false);
-    return mergeRecordSets([local, remote]);
+    if (remote.length > 0) {
+      return remote;
+    }
+
+    return loadOptionalSource(loadLocalSeedRecords, true);
   }
 
   if (provider === "official") {
