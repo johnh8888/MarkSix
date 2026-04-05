@@ -43,8 +43,24 @@ export default async function HomePage() {
         <div className="hero-copy">
           <p className="eyebrow">Vercel Special Number Predictor</p>
           <h2>香港六合彩特别号码预测</h2>
-          <p className="lede">
-          </p>
+          <div className="scheme-list">
+            <p className="scheme-item">
+              <strong>生肖号码方案：</strong>
+              依据生肖热度、遗漏周期和历史转移节奏，筛选下期更可能出现的生肖特别号池。
+            </p>
+            <p className="scheme-item">
+              <strong>热门号码方案：</strong>
+              聚焦近期高频特别号，以及与正码联动明显的热门候选号码。
+            </p>
+            <p className="scheme-item">
+              <strong>冷门号码方案：</strong>
+              重点关注长遗漏、低热度但具备回补条件的特别号码。
+            </p>
+            <p className="scheme-item">
+              <strong>其他方案：</strong>
+              综合生肖、冷热、波色、分区与转移关系，形成平衡型特别号候选池。
+            </p>
+          </div>
         </div>
 
         {latestDraw ? (

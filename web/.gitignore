@@ -214,7 +214,3 @@ coverage
 *.log
 prisma/dev.db
 prisma/dev.db-journal
-
-!src/lib/
-!src/lib/**
-

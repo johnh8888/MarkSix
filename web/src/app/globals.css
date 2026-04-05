@@ -105,6 +105,22 @@ img {
   line-height: 1.65;
 }
 
+.scheme-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.scheme-item {
+  margin: 0;
+  color: #374151;
+  line-height: 1.75;
+}
+
+.scheme-item strong {
+  color: var(--fg);
+}
+
 .issue-title {
   margin: 4px 0 6px;
   font-size: 28px;
@@ -131,6 +147,12 @@ img {
   gap: 14px;
 }
 
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--line);
@@ -145,6 +167,10 @@ img {
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
+}
+
+.stat-card h3 {
+  margin: 6px 0;
 }
 
 .badge,
@@ -218,11 +244,91 @@ code {
   overflow-wrap: anywhere;
 }
 
+.table-scroll {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
   background: #fff;
   overflow: hidden;
+}
+
+.history-balls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 260px;
+}
+
+.history-ball,
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.history-ball {
+  min-width: 34px;
+  padding: 8px 10px;
+  color: var(--accent);
+  background: rgba(11, 93, 73, 0.09);
+  font-weight: 700;
+}
+
+.source-chip {
+  padding: 8px 10px;
+  color: #7c2d12;
+  background: rgba(217, 119, 6, 0.12);
+  white-space: nowrap;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.page-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.page-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--fg);
+  font-size: 14px;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.page-link.is-active {
+  border-color: var(--accent);
+  background: rgba(11, 93, 73, 0.12);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.page-link.is-disabled {
+  pointer-events: none;
+  opacity: 0.45;
 }
 
 th,
@@ -245,6 +351,10 @@ td {
 
   .section-head {
     align-items: start;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -315,6 +425,18 @@ td {
   .grid {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .history-balls {
+    min-width: 220px;
+  }
+
+  .pagination {
+    align-items: stretch;
+  }
+
+  .page-list {
+    width: 100%;
   }
 
   .card-head {
