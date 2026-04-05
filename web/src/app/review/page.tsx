@@ -2,6 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { describeSpecialNumber, inferYearFromIssue } from "@/lib/marksix";
 import { strategyMeta } from "@/lib/strategies";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function parseJsonArray(text: string): number[] {
   try {
     return JSON.parse(text) as number[];
