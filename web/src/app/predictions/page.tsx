@@ -55,7 +55,6 @@ export default async function PredictionsPage() {
             <tr>
               <th>目标期号</th>
               <th>策略</th>
-              <th>生成时间</th>
               <th>状态</th>
               <th>候选号码</th>
             </tr>
@@ -65,7 +64,6 @@ export default async function PredictionsPage() {
               <tr key={run.id}>
                 <td>{run.issueNo}</td>
                 <td>{strategyMeta[run.strategy as keyof typeof strategyMeta]?.name ?? run.strategy}</td>
-                <td>{formatDateTime(run.createdAt)}</td>
                 <td>{run.status === "REVIEWED" ? "已复盘" : "待开奖"}</td>
                 <td>
                   <div className="history-balls">
