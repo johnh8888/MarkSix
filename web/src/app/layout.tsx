@@ -14,6 +14,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <h1>香港六合彩预测看板</h1>
           <nav>
             <a href="/">特别号预测</a>
+            <a href="/predictions">预测历史</a>
             <a href="/history">历史数据</a>
             <a href="/review">复盘</a>
           </nav>

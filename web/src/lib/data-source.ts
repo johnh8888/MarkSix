@@ -1,5 +1,6 @@
 import { parseDrawCsv, readLocalCsv } from "@/lib/csv";
 import { loadLottolyzerRecords } from "@/lib/lottolyzer-source";
+import { loadMarksix6Records } from "@/lib/marksix6-source";
 import { loadOfficialRecords } from "@/lib/official-source";
 import { type CsvDrawRecord } from "@/lib/types";
 
@@ -79,6 +80,7 @@ async function loadOptionalSource(
 
 export async function loadDrawRecords(): Promise<CsvDrawRecord[]> {
   const provider = (process.env.RESULT_PROVIDER || "hybrid").trim().toLowerCase();
+  const marksix6Required = (process.env.MARKSIX6_SOURCE_REQUIRED || "").trim() === "true";
   const officialRequired = (process.env.OFFICIAL_SOURCE_REQUIRED || "").trim() === "true";
   const lottolyzerRequired = (process.env.LOTTOLYZER_SOURCE_REQUIRED || "").trim() === "true";
 
@@ -95,15 +97,20 @@ export async function loadDrawRecords(): Promise<CsvDrawRecord[]> {
     return loadOptionalSource(loadOfficialRecords, true);
   }
 
+  if (provider === "marksix6") {
+    return loadOptionalSource(loadMarksix6Records, true);
+  }
+
   if (provider === "lottolyzer") {
     return loadOptionalSource(loadLottolyzerRecords, true);
   }
 
   const local = await loadOptionalSource(loadLocalSeedRecords, false);
   const remote = await loadOptionalSource(loadRemoteCsvRecords, false);
+  const marksix6 = await loadOptionalSource(loadMarksix6Records, marksix6Required);
   const official = await loadOptionalSource(loadOfficialRecords, officialRequired);
   const lottolyzer = await loadOptionalSource(loadLottolyzerRecords, lottolyzerRequired);
-  const merged = mergeRecordSets([local, remote, official, lottolyzer]);
+  const merged = mergeRecordSets([local, remote, marksix6, official, lottolyzer]);
 
   if (merged.length === 0) {
     throw new Error("No draw records were loaded from any configured source");

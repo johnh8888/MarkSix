@@ -48,7 +48,6 @@ export default async function ReviewPage() {
               <th>策略</th>
               <th>复盘次数</th>
               <th>平均命中值</th>
-              <th>平均精度</th>
             </tr>
           </thead>
           <tbody>
@@ -57,7 +56,6 @@ export default async function ReviewPage() {
                 <td>{strategyMeta[item.strategy as keyof typeof strategyMeta]?.name ?? item.strategy}</td>
                 <td>{item._count._all}</td>
                 <td>{(item._avg.hitCount ?? 0).toFixed(2)}</td>
-                <td>{((item._avg.hitRate ?? 0) * 100).toFixed(2)}%</td>
               </tr>
             ))}
           </tbody>
@@ -74,7 +72,6 @@ export default async function ReviewPage() {
               <th>策略</th>
               <th>是否命中</th>
               <th>命中号码</th>
-              <th>精度</th>
             </tr>
           </thead>
           <tbody>
@@ -89,7 +86,6 @@ export default async function ReviewPage() {
                   <td>{strategyMeta[review.run.strategy as keyof typeof strategyMeta]?.name ?? review.run.strategy}</td>
                   <td>{review.hitCount > 0 ? "命中" : "未中"}</td>
                   <td>{matched.length > 0 ? matched.map((number) => String(number).padStart(2, "0")).join(", ") : "-"}</td>
-                  <td>{(review.hitRate * 100).toFixed(2)}%</td>
                 </tr>
               );
             })}

@@ -5,6 +5,7 @@
 ## 当前能力
 - 以 `Mark_Six.csv` 作为本地历史种子数据
 - 自动补齐线上最新历史，支持：
+  - [Marksix6 香港彩 API](https://api3.marksix6.net/lottery_api.php?type=hk)
   - [Lottolyzer 历史页](https://zh.lottolyzer.com/history/hong-kong/mark-six/page/1/per-page/50/summary-view)
   - [HKJC 最近 30 期 JSON](https://bet.hkjc.com/contentserver/jcbw/cmc/last30draw.json)
 - Vercel Cron 自动同步最新期次，并写入 Postgres
@@ -31,6 +32,7 @@
 - `hybrid` 模式会合并：
   - 本地 CSV
   - 远程 CSV（如配置了 `RESULT_CSV_URL`）
+  - Marksix6 最新结果 API
   - HKJC 官方 JSON
   - Lottolyzer 历史页
 - 同一期号按 `issueNo` 去重，较新的远程来源会覆盖本地旧记录
@@ -90,6 +92,7 @@ npm run dev
 DATABASE_URL="auto-injected-by-vercel-neon"
 CRON_SECRET="replace-with-a-long-random-string"
 RESULT_PROVIDER="hybrid"
+MARKSIX6_API_URL="https://api3.marksix6.net/lottery_api.php?type=hk"
 LOCAL_RESULT_CSV_PATH="./Mark_Six.csv"
 OFFICIAL_RESULT_URL="https://bet.hkjc.com/contentserver/jcbw/cmc/last30draw.json"
 LOTTOLYZER_HISTORY_URL="https://zh.lottolyzer.com/history/hong-kong/mark-six"
