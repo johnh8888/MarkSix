@@ -2,10 +2,10 @@ name: 香港六合彩 Mark Six 分析助手
 
 on:
   schedule:
-    - cron: '0 15 * * *'      # 北京时间晚上 23:00（开奖后约 1.5 小时，推荐主要时间）
-    - cron: '0 16 * * *'      # 北京时间 00:00（凌晨保险）
-    - cron: '0 17 * * *'      # 北京时间 01:00（再保险一次）
-  workflow_dispatch:          # 手动测试用
+    - cron: '0 15 * * *'      # 北京时间晚上 23:00（开奖后约1.5小时）
+    - cron: '0 16 * * *'      # 凌晨 00:00
+    - cron: '0 17 * * *'      # 凌晨 01:00（保险）
+  workflow_dispatch:
 
 jobs:
   run-marksix:
@@ -21,7 +21,7 @@ jobs:
           python-version: '3.13'
 
       - name: 更新数据（香港官方结果页）
-        run: python marksix_local.py bootstrap --csv Mark_Six.csv --official-url https://bet.hkjc.com/en/marksix/results --no-require-continuity
+        run: python marksix_local.py bootstrap --csv Mark_Six.csv --official-url https://bet.hkjc.com/en/marksix/results
 
       - name: 显示最新推荐
         run: python marksix_local.py show
