@@ -2,8 +2,8 @@ name: 香港六合彩 Mark Six 分析助手
 
 on:
   schedule:
-    - cron: '0 2 * * *'      # 每天北京时间早上约10点自动运行
-  workflow_dispatch:         # 允许手动运行
+    - cron: '0 10 * * *'      # 每天北京时间下午 6:00 更新
+  workflow_dispatch:
 
 jobs:
   run-marksix:
@@ -18,8 +18,8 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: 更新数据（bootstrap）
-        run: python marksix_local.py bootstrap --csv Mark_Six.csv
+      - name: 更新数据（使用官方 JSON 接口）
+        run: python marksix_local.py bootstrap --csv Mark_Six.csv --official-url https://bet.hkjc.com/contentserver/jcbw/cmc/last30draw.json
 
-      - name: 显示最新推荐（show）
+      - name: 显示最新推荐
         run: python marksix_local.py show
