@@ -1,0 +1,25 @@
+name: 香港六合彩 Mark Six 分析助手
+
+on:
+  schedule:
+    - cron: '0 2 * * *'      # 每天北京时间早上约10点自动运行
+  workflow_dispatch:         # 允许手动运行
+
+jobs:
+  run-marksix:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 更新数据（bootstrap）
+        run: python marksix_local.py bootstrap --csv Mark_Six.csv
+
+      - name: 显示最新推荐（show）
+        run: python marksix_local.py show
