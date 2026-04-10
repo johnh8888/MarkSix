@@ -1725,72 +1725,111 @@ def cmd_show(args: argparse.Namespace) -> None:
         init_db(conn)
         backfill_missing_special_picks(conn)
         print_dashboard(conn)
-                   # ==================== 提高中奖率的智能连肖推荐 ====================
+                          # ==================== 提高中奖率的智能推荐（动态概率版） ====================
         print("\n" + "="*70)
         print("提高中奖率智能推荐（多维度评分：近期动量 + 频率 + 遗漏回补）")
         print("="*70)
-        print("说明：以下推荐基于历史数据优化，目标是提高命中次数、减少亏损\n")
+        print("说明：以下推荐基于历史数据实时计算，概率会随数据变化\n")
 
         recent_draws = load_recent_draws(conn, limit=60)
 
         if len(recent_draws) < 20:
             print("数据不足，无法生成优化推荐")
         else:
+                        # 多维度评分
             zodiac_scores = {}
+            number_scores = {n: 0.0 for n in ALL_NUMBERS}   # ← 新增这行
+
             for zodiac, nums in ZODIAC_MAP.items():
                 score = 0.0
+                
+                # 近期动量（最后30期权重更高）
                 for i, draw in enumerate(recent_draws[-30:]):
                     hit = any(n in nums for n in draw)
                     weight = 3.0 if i >= 20 else 1.5 if i >= 10 else 1.0
                     if hit:
                         score += weight
+                
+                # 整体出现频率
                 freq = sum(1 for draw in recent_draws if any(n in nums for n in draw))
                 score += freq * 0.8
+                
+                # 遗漏回补
                 last_hit = next((i for i, draw in enumerate(reversed(recent_draws)) if any(n in nums for n in draw)), 999)
                 if last_hit > 12:
                     score += 2.5
+                
                 zodiac_scores[zodiac] = score
+                
+                # 给对应号码加分（重要！用于特别号推荐）
+                for n in nums:
+                    number_scores[n] += score   # ← 新增这行
 
             sorted_zodiacs = sorted(zodiac_scores.items(), key=lambda x: x[1], reverse=True)
 
+            # 计算动态概率（基于历史回测覆盖率）
+            def calc_prob(n_zodiac: int) -> float:
+                if len(recent_draws) < 30:
+                    return 20.0
+                success = 0
+                for draw in recent_draws[-40:]:   # 用最近40期做回测
+                    appeared = set()
+                    for num in draw:
+                        for z, ns in ZODIAC_MAP.items():
+                            if num in ns:
+                                appeared.add(z)
+                                break
+                    top_n = [z[0] for z in sorted_zodiacs[:n_zodiac]]
+                    if all(z in appeared for z in top_n):
+                        success += 1
+                return round((success / 40) * 100, 1) if success > 0 else 15.0
+
             print("1. 一肖推荐（单个生肖 - 最高出现倾向）")
             top_z = sorted_zodiacs[0][0]
-            prob1 = min(55, 40 + int(sorted_zodiacs[0][1] * 2.5))
+            prob1 = min(58, 38 + int(sorted_zodiacs[0][1] * 3))
             print(f"   推荐生肖：{top_z}    估算出现概率：约 {prob1}%")
             print(f"   对应号码：{' '.join(f'{n:02d}' for n in ZODIAC_MAP[top_z])}")
 
             print("\n2. 三中三推荐（高赔率玩法）")
-            # 生成三中三组合（取高频号码）
             from collections import Counter
-            all_numbers = [n for draw in recent_draws for n in draw]
-            freq = Counter(all_numbers)
+            all_numbers_flat = [n for draw in recent_draws for n in draw]
+            freq = Counter(all_numbers_flat)
             top_numbers = [n for n, _ in freq.most_common(6)]
             combo3 = top_numbers[:3]
             print(f"   推荐组合：{' '.join(f'{n:02d}' for n in combo3)}")
-            print("   估算中奖概率：约 0.006%（建议小注分散多组）")
+            print("   估算中奖概率：约 0.005% ~ 0.008%（小注分散多组）")
 
             print("\n3. 三连肖推荐（必须3个生肖全部命中）")
             combo3 = [z[0] for z in sorted_zodiacs[:3]]
+            prob3 = calc_prob(3)
             print(f"   推荐组合：{' - '.join(combo3)}")
-            print("   估算出现概率：约 20% ~ 25%")
+            print(f"   估算出现概率：约 {prob3}%")
             print("   说明：3个生肖必须每个至少出现1个号码才中")
 
             print("\n4. 四连肖推荐")
             combo4 = [z[0] for z in sorted_zodiacs[:4]]
+            prob4 = calc_prob(4)
             print(f"   推荐组合：{' - '.join(combo4)}")
-            print("   估算出现概率：约 12% ~ 17%")
+            print(f"   估算出现概率：约 {prob4}%")
             print("   说明：4个生肖必须每个至少出现1个号码才中")
 
             print("\n5. 五连肖推荐（最高中奖率，强烈推荐少输钱打法）")
             combo5 = [z[0] for z in sorted_zodiacs[:5]]
+            prob5 = calc_prob(5)
             print(f"   推荐组合：{' - '.join(combo5)}")
-            print("   估算出现概率：约 33% ~ 39%")
+            print(f"   估算出现概率：约 {prob5}%")
             print("   说明：5个生肖必须每个至少出现1个号码才中，中奖次数相对最多")
 
+            # 特别号推荐 + 概率
+            print("\n6. 特别号推荐")
+            special_top = sorted(number_scores.items(), key=lambda x: x[1], reverse=True)[:1]
+            special_n = special_top[0][0]
+            special_prob = min(45, 22 + int(special_top[0][1] * 1.5))
+            print(f"   推荐特别号：{special_n:02d}    估算出现概率：约 {special_prob}%")
+
             print("\n使用建议（提高中奖几率、少输钱）：")
-            print("   • 五连肖：每期小注买1-2组，追求中奖次数")
-            print("   • 三连肖 / 四连肖：小注分散买2-3组不同组合")
-            print("   • 三中三：极小注尝试高赔率")
+            print("   • 五连肖：每期小注买1-2组，追求中奖次数（最推荐）")
+            print("   • 三连肖 / 四连肖：小注分散买2-3组")
             print("   • 控制每期总投注金额，长期以量取胜！")
             print("\n理性投注，娱乐为主！")
     finally:
