@@ -1,4 +1,4 @@
-nname: 香港六合彩 Mark Six 分析助手
+name: 香港六合彩 Mark Six 分析助手
 on:
   schedule:
     - cron: '0 15 * * *'
