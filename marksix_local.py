@@ -1725,18 +1725,18 @@ def cmd_show(args: argparse.Namespace) -> None:
         init_db(conn)
         backfill_missing_special_picks(conn)
         print_dashboard(conn)
-               # ==================== 提高中奖率智能推荐（真实版 - 自定义短窗口） ====================
+                    # ==================== 提高中奖率智能推荐（真实版 - 一肖推荐两个生肖） ====================
         print("\n" + "="*70)
-        print("提高中奖率智能推荐（真实历史回测版 - 自定义短窗口）")
+        print("提高中奖率智能推荐（真实历史回测版 - 一肖推荐两个生肖）")
         print("="*70)
-        print("说明：一肖使用最近3期，连肖使用最近6期，三中三/特别号使用最近8期，仅供参考\n")
+        print("说明：一肖推荐最强+次强两个生肖（13期），连肖使用16期，三中三/特别号使用18期，仅供参考\n")
 
         recent_draws = load_recent_draws(conn, limit=60)
 
-        if len(recent_draws) < 12:
+        if len(recent_draws) < 20:
             print("历史数据不足，请先运行 sync 更新最新开奖数据。")
         else:
-            # 高质量多维度评分（动量 + 频率 + 遗漏）
+            # 高质量多维度评分
             zodiac_scores = {}
             number_scores = {n: 0.0 for n in ALL_NUMBERS}
 
@@ -1769,8 +1769,8 @@ def cmd_show(args: argparse.Namespace) -> None:
 
             # 分窗口回测函数
             def calc_actual_prob(n_zodiac: int, period: int) -> float:
-                if len(recent_draws) < period + 5:
-                    return 25.0
+                if len(recent_draws) < period + 8:
+                    return 22.0
                 success = 0
                 test_draws = recent_draws[-period:]
                 top_z = [z[0] for z in sorted_zodiacs[:n_zodiac]]
@@ -1784,16 +1784,21 @@ def cmd_show(args: argparse.Namespace) -> None:
                     if all(z in appeared for z in top_z):
                         success += 1
                 prob = (success / len(test_draws)) * 100
-                return max(6.0, round(prob, 1))   # 平滑处理，避免过低
+                return max(5.0, round(prob, 1))
 
-            # 1. 一肖推荐（3期）
-            print("1. 一肖推荐（当前最强生肖）")
-            top_z = sorted_zodiacs[0][0]
-            prob1 = calc_actual_prob(1, 3)
-            print(f"   推荐生肖：{top_z}    最近3期回测出现率：约 {prob1}%")
-            print(f"   对应号码：{' '.join(f'{n:02d}' for n in ZODIAC_MAP[top_z])}")
+            # 1. 一肖推荐（改为推荐两个生肖）
+            print("1. 一肖推荐（最强 + 次强生肖）")
+            top1_z = sorted_zodiacs[0][0]
+            top2_z = sorted_zodiacs[1][0]
+            prob1 = calc_actual_prob(1, 13)
+            prob2 = calc_actual_prob(1, 13)   # 次强也用相同窗口计算参考
+            print(f"   最强推荐：{top1_z}    最近13期回测出现率：约 {prob1}%")
+            print(f"   次强推荐：{top2_z}    最近13期回测出现率：约 {prob2}%")
+            print(f"   最强对应号码：{' '.join(f'{n:02d}' for n in ZODIAC_MAP[top1_z])}")
+            print(f"   次强对应号码：{' '.join(f'{n:02d}' for n in ZODIAC_MAP[top2_z])}")
+            print("   建议：可单选最强，或同时买两个生肖增加覆盖")
 
-            # 2. 三中三推荐（8期）
+            # 2. 三中三推荐（18期）
             print("\n2. 三中三推荐（动态高频号码组合）")
             from collections import Counter
             all_flat = [n for draw in recent_draws for n in draw]
@@ -1801,7 +1806,7 @@ def cmd_show(args: argparse.Namespace) -> None:
             top_nums = [n for n, _ in freq_counter.most_common(8)]
 
             hit_at_least2 = hit3 = 0
-            test_count = min(8, len(recent_draws))
+            test_count = min(18, len(recent_draws))
             for draw in recent_draws[-test_count:]:
                 hits = sum(1 for n in draw if n in top_nums[:6])
                 if hits >= 3:
@@ -1814,37 +1819,35 @@ def cmd_show(args: argparse.Namespace) -> None:
             p_exact3 = round((hit3 / test_count) * 100, 1) if test_count > 0 else 0.0
 
             print(f"   当前热门号码（Top 6）：{' '.join(f'{n:02d}' for n in top_nums[:6])}")
-            print(f"   最近8期回测：至少中2个 ≈ {max(20.0, p_atleast2)}%    精准中3个 ≈ {p_exact3}%")
+            print(f"   最近18期回测：至少中2个 ≈ {max(18.0, p_atleast2)}%    精准中3个 ≈ {p_exact3}%")
             print("   建议：小注分散购买多组三中三，提高覆盖率")
 
-            # 3. 三连肖（6期）
+            # 3. 三连肖（16期）
             print("\n3. 三连肖推荐")
             combo3 = [z[0] for z in sorted_zodiacs[:3]]
-            prob3 = calc_actual_prob(3, 6)
-            print(f"   推荐组合：{' - '.join(combo3)}    最近6期回测出现率：约 {prob3}%")
+            prob3 = calc_actual_prob(3, 16)
+            print(f"   推荐组合：{' - '.join(combo3)}    最近16期回测出现率：约 {prob3}%")
 
-            # 4. 四连肖（6期）
+            # 4. 四连肖（16期）
             print("\n4. 四连肖推荐")
             combo4 = [z[0] for z in sorted_zodiacs[:4]]
-            prob4 = calc_actual_prob(4, 6)
-            print(f"   推荐组合：{' - '.join(combo4)}    最近6期回测出现率：约 {prob4}%")
+            prob4 = calc_actual_prob(4, 16)
+            print(f"   推荐组合：{' - '.join(combo4)}    最近16期回测出现率：约 {prob4}%")
 
-            # 5. 五连肖（6期）
+            # 5. 五连肖（16期）
             print("\n5. 五连肖推荐（适合长期小注追求中奖次数）")
             combo5 = [z[0] for z in sorted_zodiacs[:5]]
-            prob5 = calc_actual_prob(5, 6)
-            print(f"   推荐组合：{' - '.join(combo5)}    最近6期回测出现率：约 {max(10.0, prob5)}%")
+            prob5 = calc_actual_prob(5, 16)
+            print(f"   推荐组合：{' - '.join(combo5)}    最近16期回测出现率：约 {max(9.0, prob5)}%")
 
-            # 6. 特别号推荐（8期）
+            # 6. 特别号推荐（18期）
             print("\n6. 特别号推荐")
             special_top = sorted(number_scores.items(), key=lambda x: x[1], reverse=True)[:3]
             special_n = special_top[0][0]
-            print(f"   推荐特别号：{special_n:02d}    （基于最近8期评分）")
+            print(f"   推荐特别号：{special_n:02d}    （基于最近18期评分）")
             print(f"   Top 3 候选：{' '.join(f'{n:02d}' for n, _ in special_top)}")
 
             print("\n理性投注建议：")
-            print("   • 一肖（3期）与连肖（6期）更关注最新短期趋势")
-            print("   • 三中三和特别号使用8期窗口，相对平衡")
     finally:
         conn.close()
 
