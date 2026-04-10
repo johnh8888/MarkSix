@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.request import Request, urlopen
-# ==================== 2026 马年生肖映射表 ====================
+# ==================== 2026 马年生肖表 ====================
 ZODIAC_MAP = {
     "马": [1, 13, 25, 37, 49],
     "羊": [12, 24, 36, 48],
