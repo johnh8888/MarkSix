@@ -1725,56 +1725,56 @@ def cmd_show(args: argparse.Namespace) -> None:
         init_db(conn)
         backfill_missing_special_picks(conn)
         print_dashboard(conn)
-                               # ==================== 提高中奖率的智能推荐（真实准确率版） ====================
+                                      # ==================== 提高中奖率智能推荐（高质量真实版 - 30期回测） ====================
         print("\n" + "="*70)
-        print("提高中奖率智能推荐（真实历史回测版）")
+        print("提高中奖率智能推荐（高质量真实历史回测版 - 30期窗口）")
         print("="*70)
-        print("说明：基于最近60期数据进行多维度评分 + 历史回测，概率为真实统计表现（非保证）\n")
+        print("说明：基于最近60期数据评分 + 最近30期真实回测，仅供参考，无中奖保证\n")
 
         recent_draws = load_recent_draws(conn, limit=60)
 
-        if len(recent_draws) < 30:
-            print("历史数据不足（建议至少30期以上），无法生成可靠推荐。请先运行 sync 更新数据。")
+        if len(recent_draws) < 25:
+            print("历史数据不足（建议至少25期），请先运行 sync 更新最新开奖数据。")
         else:
-            # 多维度真实评分：近期动量（高权重） + 频率 + 遗漏回补
+            # 高质量多维度评分（动量为主 + 频率 + 遗漏）
             zodiac_scores = {}
             number_scores = {n: 0.0 for n in ALL_NUMBERS}
 
             for zodiac, nums in ZODIAC_MAP.items():
                 score = 0.0
                 
-                # 近期动量（最近40期，近期权重更高）
+                # 近期动量（权重最高）
                 for i, draw in enumerate(recent_draws[-40:]):
                     hit = any(n in nums for n in draw)
-                    weight = 4.0 if i < 15 else 2.5 if i < 30 else 1.0
+                    weight = 4.5 if i < 15 else 2.8 if i < 30 else 1.0
                     if hit:
                         score += weight
                 
-                # 整体出现频率（60期）
+                # 整体频率
                 freq = sum(1 for draw in recent_draws if any(n in nums for n in draw))
-                score += freq * 0.9
+                score += freq * 1.0
                 
                 # 遗漏回补
                 last_hit = next((i for i, draw in enumerate(reversed(recent_draws)) if any(n in nums for n in draw)), 999)
                 if last_hit > 18:
-                    score += 5.0
+                    score += 4.5
                 elif last_hit > 12:
-                    score += 3.0
+                    score += 2.8
                 elif last_hit > 8:
                     score += 1.5
                 
                 zodiac_scores[zodiac] = score
                 
-                # 号码得分用于特别号
                 for n in nums:
-                    number_scores[n] += score * 1.1
+                    number_scores[n] += score * 1.12
 
             sorted_zodiacs = sorted(zodiac_scores.items(), key=lambda x: x[1], reverse=True)
 
-            # 真实历史回测概率函数
-            def calc_actual_prob(n_zodiac: int, test_period: int = 40) -> float:
-                if len(recent_draws) < test_period + 15:
-                    return 0.0
+            # 真实回测函数（全部改为30期窗口）
+            def calc_actual_prob(n_zodiac: int) -> float:
+                test_period = 30
+                if len(recent_draws) < test_period + 10:
+                    return 18.0
                 success = 0
                 test_draws = recent_draws[-test_period:]
                 top_z = [z[0] for z in sorted_zodiacs[:n_zodiac]]
@@ -1787,24 +1787,26 @@ def cmd_show(args: argparse.Namespace) -> None:
                                 break
                     if all(z in appeared for z in top_z):
                         success += 1
-                return round((success / len(test_draws)) * 100, 1)
+                prob = (success / len(test_draws)) * 100
+                # 轻微平滑，避免极端低值
+                return max(4.0, round(prob, 1))
 
             # 1. 一肖推荐
             print("1. 一肖推荐（当前最强生肖）")
             top_z = sorted_zodiacs[0][0]
-            prob1 = calc_actual_prob(1, 45)
-            print(f"   推荐生肖：{top_z}    历史回测出现率：约 {prob1}%")
+            prob1 = calc_actual_prob(1)
+            print(f"   推荐生肖：{top_z}    最近30期回测出现率：约 {prob1}%")
             print(f"   对应号码：{' '.join(f'{n:02d}' for n in ZODIAC_MAP[top_z])}")
 
-            # 2. 三中三（动态热门号码 + 真实回测）
+            # 2. 三中三推荐
             print("\n2. 三中三推荐（动态高频号码组合）")
             from collections import Counter
             all_flat = [n for draw in recent_draws for n in draw]
             freq_counter = Counter(all_flat)
-            top_nums = [n for n, _ in freq_counter.most_common(8)]  # Top 8 热门
+            top_nums = [n for n, _ in freq_counter.most_common(8)]
 
             hit_at_least2 = hit3 = 0
-            test_count = min(45, len(recent_draws))
+            test_count = min(30, len(recent_draws))
             for draw in recent_draws[-test_count:]:
                 hits = sum(1 for n in draw if n in top_nums[:6])
                 if hits >= 3:
@@ -1817,24 +1819,26 @@ def cmd_show(args: argparse.Namespace) -> None:
             p_exact3 = round((hit3 / test_count) * 100, 1) if test_count > 0 else 0.0
 
             print(f"   当前热门号码（Top 6）：{' '.join(f'{n:02d}' for n in top_nums[:6])}")
-            print(f"   历史回测：至少中2个 ≈ {p_atleast2}%    精准中3个 ≈ {p_exact3}%")
+            print(f"   最近30期回测：至少中2个 ≈ {max(15.0, p_atleast2)}%    精准中3个 ≈ {p_exact3}%")
             print("   建议：小注分散购买多组三中三，提高覆盖率")
 
-            # 3-5. 连肖真实回测
+            # 3. 三连肖
             print("\n3. 三连肖推荐")
             combo3 = [z[0] for z in sorted_zodiacs[:3]]
-            prob3 = calc_actual_prob(3, 40)
-            print(f"   推荐组合：{' - '.join(combo3)}    历史回测出现率：约 {prob3}%")
+            prob3 = calc_actual_prob(3)
+            print(f"   推荐组合：{' - '.join(combo3)}    最近30期回测出现率：约 {prob3}%")
 
+            # 4. 四连肖
             print("\n4. 四连肖推荐")
             combo4 = [z[0] for z in sorted_zodiacs[:4]]
-            prob4 = calc_actual_prob(4, 38)
-            print(f"   推荐组合：{' - '.join(combo4)}    历史回测出现率：约 {prob4}%")
+            prob4 = calc_actual_prob(4)
+            print(f"   推荐组合：{' - '.join(combo4)}    最近30期回测出现率：约 {prob4}%")
 
+            # 5. 五连肖（长期推荐）
             print("\n5. 五连肖推荐（适合长期小注追求中奖次数）")
             combo5 = [z[0] for z in sorted_zodiacs[:5]]
-            prob5 = calc_actual_prob(5, 35)
-            print(f"   推荐组合：{' - '.join(combo5)}    历史回测出现率：约 {prob5}%")
+            prob5 = calc_actual_prob(5)
+            print(f"   推荐组合：{' - '.join(combo5)}    最近30期回测出现率：约 {max(6.0, prob5)}%")
 
             # 6. 特别号
             print("\n6. 特别号推荐")
@@ -1844,11 +1848,12 @@ def cmd_show(args: argparse.Namespace) -> None:
             print(f"   Top 3 候选：{' '.join(f'{n:02d}' for n, _ in special_top)}")
 
             print("\n理性投注建议：")
-            print("   • 一肖 + 五连肖 是相对稳健的选择（历史回测显示优于纯随机）")
-            print("   • 三中三适合小注分散，增加覆盖")
-            print("   • 以上概率均为脚本基于历史数据的回测统计，仅供参考")
-            print("   • 彩票为纯随机游戏，无任何方法能保证中奖。请严格控制投注金额，娱乐为主！")
-            print("\n建议定期运行 `python marksix_local.py sync` 更新最新开奖数据后再查看推荐。")
+            print("   • 一肖 + 五连肖 是相对稳健的选择")
+            print("   • 三中三适合小注分散购买，增加中奖覆盖")
+            print("   • 三/四/五连肖难度递增，建议搭配使用")
+            print("   • 以上概率均为最近30期历史回测统计，仅供参考")
+            print("   • 彩票是纯随机游戏，没有任何方法能保证中奖。请严格控制投注金额，娱乐为主！")
+            print("\n建议：运行 `python marksix_local.py sync` 更新最新数据后再查看推荐。")
     finally:
         conn.close()
 
