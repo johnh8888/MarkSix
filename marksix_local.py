@@ -1725,7 +1725,7 @@ def cmd_show(args: argparse.Namespace) -> None:
         init_db(conn)
         backfill_missing_special_picks(conn)
         print_dashboard(conn)
-            # ==================== 提高中奖率的智能连肖推荐（新增部分） ====================
+                   # ==================== 提高中奖率的智能连肖推荐 ====================
         print("\n" + "="*70)
         print("提高中奖率智能推荐（多维度评分：近期动量 + 频率 + 遗漏回补）")
         print("="*70)
@@ -1739,23 +1739,16 @@ def cmd_show(args: argparse.Namespace) -> None:
             zodiac_scores = {}
             for zodiac, nums in ZODIAC_MAP.items():
                 score = 0.0
-                
-                # 近期动量（最后30期权重更高）
                 for i, draw in enumerate(recent_draws[-30:]):
                     hit = any(n in nums for n in draw)
                     weight = 3.0 if i >= 20 else 1.5 if i >= 10 else 1.0
                     if hit:
                         score += weight
-                
-                # 整体出现频率
                 freq = sum(1 for draw in recent_draws if any(n in nums for n in draw))
                 score += freq * 0.8
-                
-                # 遗漏回补
                 last_hit = next((i for i, draw in enumerate(reversed(recent_draws)) if any(n in nums for n in draw)), 999)
                 if last_hit > 12:
                     score += 2.5
-                
                 zodiac_scores[zodiac] = score
 
             sorted_zodiacs = sorted(zodiac_scores.items(), key=lambda x: x[1], reverse=True)
@@ -1767,7 +1760,13 @@ def cmd_show(args: argparse.Namespace) -> None:
             print(f"   对应号码：{' '.join(f'{n:02d}' for n in ZODIAC_MAP[top_z])}")
 
             print("\n2. 三中三推荐（高赔率玩法）")
-            print("   推荐组合示例：13 25 37")
+            # 生成三中三组合（取高频号码）
+            from collections import Counter
+            all_numbers = [n for draw in recent_draws for n in draw]
+            freq = Counter(all_numbers)
+            top_numbers = [n for n, _ in freq.most_common(6)]
+            combo3 = top_numbers[:3]
+            print(f"   推荐组合：{' '.join(f'{n:02d}' for n in combo3)}")
             print("   估算中奖概率：约 0.006%（建议小注分散多组）")
 
             print("\n3. 三连肖推荐（必须3个生肖全部命中）")
