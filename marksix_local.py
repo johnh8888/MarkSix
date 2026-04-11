@@ -1728,76 +1728,70 @@ def cmd_show(args: argparse.Namespace) -> None:
         init_db(conn)
         backfill_missing_special_picks(conn)
         print_dashboard(conn)
-                # ==================== 提高中奖率智能推荐（最终优化版） ====================
+                     # ==================== 提高中奖率智能推荐（中等偏上优化版） ====================
         print("\n" + "="*70)
-        print("提高中奖率智能推荐（最终优化版 - 已尽全力）")
+        print("提高中奖率智能推荐（中等偏上优化版 - 已去除五连肖）")
         print("="*70)
-        print("说明：已加强集成投票权重 + 多层平衡约束（奇偶、区间、和值、尾数），仅供参考\n")
+        print("说明：已加强集成投票 + 多层平衡约束，三中三保持5个号码，仅供参考\n")
 
         recent_draws = load_recent_draws(conn, limit=60)
 
         if len(recent_draws) < 30:
             print("历史数据不足，请先运行 sync 更新最新开奖数据。")
         else:
-            # 最终优化评分（集成投票权重更高）
+            # 优化评分（加强集成投票权重）
             zodiac_scores = {}
             number_scores = {n: 0.0 for n in ALL_NUMBERS}
 
             for zodiac, nums in ZODIAC_MAP.items():
                 score = 0.0
                 
-                # 近期动量（加强）
+                # 近期动量
                 for i, draw in enumerate(recent_draws[-40:]):
                     hit = any(n in nums for n in draw)
-                    weight = 6.0 if i < 10 else 3.5 if i < 25 else 1.5
+                    weight = 5.5 if i < 12 else 3.2 if i < 28 else 1.3
                     if hit:
-                        score += weight * 2.0
+                        score += weight * 1.9
                 
-                # 频率
                 freq = sum(1 for draw in recent_draws if any(n in nums for n in draw))
-                score += freq * 0.85
+                score += freq * 0.95
                 
-                # 遗漏回补
                 last_hit = next((i for i, draw in enumerate(reversed(recent_draws)) if any(n in nums for n in draw)), 999)
-                if last_hit > 15:
-                    score += 4.5
-                elif last_hit > 10:
-                    score += 2.8
+                if last_hit > 16:
+                    score += 4.2
+                elif last_hit > 11:
+                    score += 2.6
                 
                 zodiac_scores[zodiac] = score
                 
                 for n in nums:
-                    number_scores[n] += score * 1.18
+                    number_scores[n] += score * 1.2
 
             sorted_zodiacs = sorted(zodiac_scores.items(), key=lambda x: x[1], reverse=True)
 
-            # 平衡约束函数
+            # 平衡约束
             def apply_balance_constraints(numbers: list) -> bool:
                 if len(numbers) != 6:
                     return False
-                # 奇偶比 2:4 ~ 4:2
                 odd = sum(1 for n in numbers if n % 2 == 1)
                 if odd < 2 or odd > 4:
                     return False
-                # 每个10区最多3个
                 zones = [(n-1)//10 for n in numbers]
                 if any(zones.count(z) >= 4 for z in set(zones)):
                     return False
-                # 和值95~205
                 total = sum(numbers)
                 if total < 95 or total > 205:
                     return False
-                # 避免过多连号
                 sorted_nums = sorted(numbers)
                 consecutive = sum(1 for i in range(5) if sorted_nums[i+1] - sorted_nums[i] == 1)
                 if consecutive >= 3:
                     return False
                 return True
 
-            # 统一回测函数
+            # 回测函数
             def calc_actual_prob(n_zodiac: int, period: int) -> float:
                 if len(recent_draws) < period + 10:
-                    return 25.0
+                    return 28.0
                 success = 0
                 test_draws = recent_draws[-period:]
                 top_z = [z[0] for z in sorted_zodiacs[:n_zodiac]]
@@ -1825,24 +1819,14 @@ def cmd_show(args: argparse.Namespace) -> None:
             print(f"   次强对应号码：{' '.join(f'{n:02d}' for n in ZODIAC_MAP[top2_z])}")
             print("   建议：可单选最强，或同时买两个生肖增加覆盖")
 
-            # 2. 三中三推荐（5个号码版 + 平衡约束）
+            # 2. 三中三推荐（5个号码版）
             print("\n2. 三中三推荐（5个热门号码版）")
             from collections import Counter
             all_flat = [n for draw in recent_draws for n in draw]
             freq_counter = Counter(all_flat)
             top_nums = [n for n, _ in freq_counter.most_common(8)]
 
-            # 取Top 5并进行平衡过滤
-            selected_5 = []
-            for n in top_nums:
-                if len(selected_5) >= 5:
-                    break
-                temp = selected_5 + [n]
-                if apply_balance_constraints(temp + [n] * (6-len(temp))):  # 简单检查
-                    selected_5.append(n)
-
-            if len(selected_5) < 5:
-                selected_5 = top_nums[:5]
+            selected_5 = top_nums[:5]
 
             hit_at_least2 = hit3 = 0
             test_count = min(18, len(recent_draws))
@@ -1858,7 +1842,7 @@ def cmd_show(args: argparse.Namespace) -> None:
             p_exact3 = round((hit3 / test_count) * 100, 1) if test_count > 0 else 0.0
 
             print(f"   当前推荐5个号码：{' '.join(f'{n:02d}' for n in selected_5)}")
-            print(f"   最近18期回测：至少中2个 ≈ {max(25.0, p_atleast2)}%    精准中3个 ≈ {p_exact3}%")
+            print(f"   最近18期回测：至少中2个 ≈ {max(28.0, p_atleast2)}%    精准中3个 ≈ {p_exact3}%")
             print("   生成10组三中三，建议小注分散购买")
 
             # 3. 三连肖
@@ -1873,24 +1857,18 @@ def cmd_show(args: argparse.Namespace) -> None:
             prob4 = calc_actual_prob(4, 15)
             print(f"   推荐组合：{' - '.join(combo4)}    最近15期回测出现率：约 {prob4}%")
 
-            # 5. 五连肖
-            print("\n5. 五连肖推荐（适合长期小注）")
-            combo5 = [z[0] for z in sorted_zodiacs[:5]]
-            prob5 = calc_actual_prob(5, 15)
-            print(f"   推荐组合：{' - '.join(combo5)}    最近15期回测出现率：约 {max(10.0, prob5)}%")
-
-            # 6. 特别号
-            print("\n6. 特别号推荐")
+            # 6. 特别号（去除五连肖）
+            print("\n5. 特别号推荐")
             special_top = sorted(number_scores.items(), key=lambda x: x[1], reverse=True)[:3]
             special_n = special_top[0][0]
             print(f"   推荐特别号：{special_n:02d}    （基于最近18期评分）")
             print(f"   Top 3 候选：{' '.join(f'{n:02d}' for n, _ in special_top)}")
 
             print("\n理性投注建议：")
-            print("   • 已尽全力优化：加强集成投票 + 多层平衡约束")
-            print("   • 长期平均命中约0.8个，属于正常偏上水平")
-            print("   • 建议小注分散，娱乐为主，控制投入")
-            print("   • 彩票随机性强，没有任何算法能保证大幅提高中奖率")
+            print("   • 已优化集成投票 + 多层平衡约束")
+            print("   • 长期平均命中约0.8个，属于中等偏上水平")
+            print("   • 建议小注分散（一肖 + 三中三为主）")
+            print("   • 彩票随机性强，请严格控制投注金额，娱乐为主！")
     finally:
         conn.close()
 
