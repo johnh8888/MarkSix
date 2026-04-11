@@ -32,8 +32,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DB_PATH_DEFAULT = str(SCRIPT_DIR / "marksix_local.db")
 CSV_PATH_DEFAULT = str(SCRIPT_DIR / "Mark_Six.csv")
 OFFICIAL_URL_DEFAULT = "https://bet.hkjc.com/contentserver/jcbw/cmc/last30draw.json"
-THIRD_PARTY_MAX_PAGES_DEFAULT = 60
+
 THIRD_PARTY_URLS_DEFAULT: List[str] = [
+    "https://marksix6.net/index.php?api=1",                    # 稳定第三方API
+    "https://lottery.hk/en/mark-six/results/",                 # 另一个可靠来源
     "https://lottolyzer.com/history/hong-kong/mark-six/page/1/per-page/50/summary-view",
 ]
 MINED_CONFIG_KEY = "mined_strategy_config_v1"
