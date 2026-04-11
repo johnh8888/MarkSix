@@ -1,14 +1,14 @@
-name: 香港 Mark Six 分析助手
+name: 香港六合彩 Mark Six 分析助手
 
 on:
   schedule:
     - cron: '15 15 * * *'   # 北京时间晚上 23:15（开奖后）
     - cron: '0 16 * * *'    # 凌晨 00:00
     - cron: '0 17 * * *'    # 凌晨 01:00
-  workflow_dispatch:
+  workflow_dispatch:        # 允许手动触发
 
 jobs:
-  run-marksix:                  # ← 这里必须是 run-marksix
+  run-marksix:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,14 +23,15 @@ jobs:
       - name: 安装依赖
         run: pip install requests
 
-            - name: 更新最新开奖数据 (多备用源)
+      - name: 更新最新开奖数据 (只使用可靠第三方源)
         run: |
           python marksix_local.py sync \
-            --source auto \
+            --source third_party \
             --third-party-url "https://lottolyzer.com/history/hong-kong/mark-six/page/1/per-page/50/summary-view" \
-            --third-party-url "https://lottery.hk/en/mark-six/results/" \
+            --third-party-url "https://marksix6.net/index.php?api=1" \
             --third-party-max-pages 10 \
             --no-require-continuity
+
       - name: 显示最新开奖 + 智能推荐
         run: python marksix_local.py show
 
