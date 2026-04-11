@@ -1,14 +1,14 @@
-name: 香港分析助手
+name: 香港 Mark Six 分析助手
 
 on:
   schedule:
     - cron: '15 15 * * *'   # 北京时间晚上 23:15（开奖后）
     - cron: '0 16 * * *'    # 凌晨 00:00
     - cron: '0 17 * * *'    # 凌晨 01:00
-  workflow_dispatch:        # 允许手动触发
+  workflow_dispatch:
 
 jobs:
-  run-marksix:
+  run-marksix:                  # ← 这里必须是 run-marksix
     runs-on: ubuntu-latest
 
     steps:
@@ -20,10 +20,10 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: 安装依赖（如果有）
+      - name: 安装依赖
         run: pip install requests
 
-                  - name: 更新最新开奖数据 (优先官方 + 多备用源)
+      - name: 更新最新开奖数据 (优先官方 + 多备用源)
         run: |
           python marksix_local.py sync \
             --source auto \
@@ -35,7 +35,7 @@ jobs:
       - name: 显示最新开奖 + 智能推荐
         run: python marksix_local.py show
 
-      - name: 提交更新后的数据库和CSV（可选）
+      - name: 提交更新后的数据库和CSV (可选)
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
