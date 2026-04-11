@@ -23,7 +23,7 @@ jobs:
       - name: 安装依赖（如果有）
         run: pip install requests
 
-            - name: 更新最新开奖数据 (优先官方 + 多备用源)
+                  - name: 更新最新开奖数据 (优先官方 + 多备用源)
         run: |
           python marksix_local.py sync \
             --source auto \
