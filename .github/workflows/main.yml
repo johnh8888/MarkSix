@@ -23,7 +23,7 @@ jobs:
       - name: 安装依赖
         run: pip install requests
 
-              - name: 更新最新开奖数据 (只使用稳定第三方API)
+      - name: 更新最新开奖数据 (只使用最稳定第三方)
         run: |
           python marksix_local.py sync \
             --source third_party \
