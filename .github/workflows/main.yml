@@ -23,13 +23,14 @@ jobs:
       - name: 安装依赖
         run: pip install requests
 
-      - name: 更新最新开奖数据 (只使用最稳定第三方)
+            - name: 更新最新开奖数据 (多备用源)
         run: |
           python marksix_local.py sync \
-            --source third_party \
-            --third-party-url "https://marksix6.net/index.php?api=1" \
+            --source auto \
+            --third-party-url "https://lottolyzer.com/history/hong-kong/mark-six/page/1/per-page/50/summary-view" \
+            --third-party-url "https://lottery.hk/en/mark-six/results/" \
+            --third-party-max-pages 10 \
             --no-require-continuity
-
       - name: 显示最新开奖 + 智能推荐
         run: python marksix_local.py show
 
