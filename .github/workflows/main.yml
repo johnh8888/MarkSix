@@ -29,5 +29,7 @@ jobs:
       - name: 生成预测
         run: python marksix_pro.py predict
       
-      - name: 显示推荐
-        run: python marksix_pro.py show
+      - name: 显示推荐并推送
+  env:
+    PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+  run: python marksix_ultimate.py show
