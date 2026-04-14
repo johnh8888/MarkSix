@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-香港六合彩 
+香港六合彩 - 玄学融合终极版（内置五行八字 + 日历冲煞 + 动态权重 + 蒙特卡洛）
+用法:
     python marksix_ultimate.py sync
     python marksix_ultimate.py predict
     python marksix_ultimate.py show
@@ -14,16 +15,24 @@ import io
 import json
 import logging
 import math
+import os
 import random
 import re
 import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from itertools import combinations
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 from urllib.request import Request, urlopen
+
+# 尝试导入 requests（用于微信推送）
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
 
 # -------------------- 配置文件处理 --------------------
 try:
@@ -44,11 +53,11 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("marksix_ultimate")
+logger = logging.getLogger("marksix_fengshui")
 
 # -------------------- 常量与配置 --------------------
 SCRIPT_DIR = Path(__file__).resolve().parent
-DB_PATH_DEFAULT = str(SCRIPT_DIR / CONFIG.get("db_name", "marksix_ultimate.db"))
+DB_PATH_DEFAULT = str(SCRIPT_DIR / CONFIG.get("db_name", "marksix_fengshui.db"))
 
 OFFICIAL_URL = CONFIG.get(
     "official_url", "https://bet.hkjc.com/contentserver/jcbw/cmc/last30draw.json"
@@ -62,7 +71,7 @@ THIRD_PARTY_URLS_DEFAULT = CONFIG.get(
 )
 THIRD_PARTY_MAX_PAGES_DEFAULT = CONFIG.get("third_party_max_pages", 60)
 
-# 策略基础权重模板 (动态优化将在此基础上微调)
+# 策略配置
 STRATEGY_CONFIGS = {
     "hot": {"name": "热号策略", "w_freq": 0.7, "w_omit": 0.0, "w_mom": 0.3},
     "cold": {"name": "冷号回补", "w_freq": 0.0, "w_omit": 0.7, "w_mom": 0.3},
@@ -89,7 +98,7 @@ ZODIAC_MAP = {
     "蛇": [2, 14, 26, 38],
 }
 
-# 波色映射 (用于过滤)
+# 波色映射（用于过滤）
 COLOR_MAP = {
     "红": [1,2,7,8,12,13,18,19,23,24,29,30,34,35,40,45,46],
     "蓝": [3,4,9,10,14,15,20,21,25,26,31,32,36,37,41,42,47,48],
@@ -97,9 +106,59 @@ COLOR_MAP = {
 }
 
 ALL_NUMBERS = list(range(1, 50))
-
-MONTE_CARLO_TRIALS = CONFIG.get("monte_carlo_trials", 5000)  # 提升至5000
+MONTE_CARLO_TRIALS = CONFIG.get("monte_carlo_trials", 5000)
 SUM_TARGET = CONFIG.get("sum_target", (115, 185))
+PREDICT_WINDOW = CONFIG.get("predict_window", 30)  # 用于投注推荐的历史期数
+
+# 统计与玄学的融合权重
+STAT_WEIGHT = 0.6
+FENGSHUI_WEIGHT = 0.4
+
+# -------------------- 玄学映射表 --------------------
+# 号码五行
+WUXING_NUM_MAP = {
+    "金": [4,5,12,13,20,21,28,29,36,37,44,45],
+    "木": [1,8,9,16,17,24,25,32,33,40,41,48,49],
+    "水": [6,7,14,15,22,23,30,31,38,39,46,47],
+    "火": [2,3,10,11,18,19,26,27,34,35,42,43],
+    "土": [5,6,13,14,21,22,29,30,37,38,45,46]
+}
+
+# 生肖五行属性
+ZODIAC_WUXING = {
+    "鼠": "水", "牛": "土", "虎": "木", "兔": "木",
+    "龙": "土", "蛇": "火", "马": "火", "羊": "土",
+    "猴": "金", "鸡": "金", "狗": "土", "猪": "水"
+}
+
+# 生肖六冲
+ZODIAC_CLASH = {
+    "鼠": "马", "马": "鼠",
+    "牛": "羊", "羊": "牛",
+    "虎": "猴", "猴": "虎",
+    "兔": "鸡", "鸡": "兔",
+    "龙": "狗", "狗": "龙",
+    "蛇": "猪", "猪": "蛇"
+}
+
+# 生肖六合
+ZODIAC_HARMONY = {
+    "鼠": "牛", "牛": "鼠",
+    "虎": "猪", "猪": "虎",
+    "兔": "狗", "狗": "兔",
+    "龙": "鸡", "鸡": "龙",
+    "蛇": "猴", "猴": "蛇",
+    "马": "羊", "羊": "马"
+}
+
+# 五行生克关系
+WUXING_RELATION = {
+    "金": {"生": "水", "克": "木", "被生": "土", "被克": "火"},
+    "木": {"生": "火", "克": "土", "被生": "水", "被克": "金"},
+    "水": {"生": "木", "克": "火", "被生": "金", "被克": "土"},
+    "火": {"生": "土", "克": "金", "被生": "木", "被克": "水"},
+    "土": {"生": "金", "克": "水", "被生": "火", "被克": "木"}
+}
 
 
 # -------------------- 数据结构 --------------------
@@ -117,6 +176,27 @@ class StrategyScore:
     special_pick: int
     confidence: float
     raw_scores: Dict[int, float] = field(default_factory=dict)
+
+
+# -------------------- 微信推送功能 --------------------
+def send_pushplus_notification(title: str, content: str) -> bool:
+    token = os.environ.get("PUSHPLUS_TOKEN", "")
+    if not token:
+        print("ℹ️ 未配置 PUSHPLUS_TOKEN，跳过微信推送。")
+        return False
+    if not HAS_REQUESTS:
+        print("❌ 未安装 requests 库，无法推送微信消息。请运行: pip install requests")
+        return False
+    url = "http://www.pushplus.plus/send"
+    data = {"token": token, "title": title, "content": content}
+    try:
+        resp = requests.post(url, json=data, timeout=10)
+        if resp.status_code == 200 and resp.json().get("code") == 200:
+            print("✅ 已通过 PushPlus 推送到微信")
+            return True
+    except Exception as e:
+        print(f"❌ 推送异常: {e}")
+    return False
 
 
 # -------------------- 工具函数 --------------------
@@ -147,6 +227,65 @@ def get_zodiac(num: int) -> str:
         if num in nums:
             return z
     return ""
+
+
+def get_num_wuxing(num: int) -> str:
+    for w, nums in WUXING_NUM_MAP.items():
+        if num in nums:
+            return w
+    return ""
+
+
+# -------------------- 日干支与玄学计算 --------------------
+def get_day_ganzhi(dt: date) -> Tuple[str, str, str]:
+    """返回 (天干, 地支, 日柱五行)"""
+    base = date(1900, 1, 1)
+    days = (dt - base).days
+    gan_list = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸"]
+    zhi_list = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"]
+    gan = gan_list[days % 10]
+    zhi = zhi_list[days % 12]
+    gan_wuxing = {"甲": "木", "乙": "木", "丙": "火", "丁": "火", "戊": "土",
+                  "己": "土", "庚": "金", "辛": "金", "壬": "水", "癸": "水"}
+    return gan, zhi, gan_wuxing[gan]
+
+
+def calculate_fengshui_score(num: int, day_gan: str, day_zhi: str, day_wuxing: str) -> float:
+    """计算单个号码的玄学得分（范围约 -1.0 到 1.0）"""
+    score = 0.0
+    zodiac = get_zodiac(num)
+    num_wuxing = get_num_wuxing(num)
+
+    # 1. 五行生克（与日五行）
+    if num_wuxing and day_wuxing:
+        if num_wuxing == WUXING_RELATION[day_wuxing]["生"]:
+            score += 0.3  # 号码五行生日柱五行
+        elif num_wuxing == WUXING_RELATION[day_wuxing]["被生"]:
+            score += 0.2  # 日柱五行生号码五行
+        elif num_wuxing == WUXING_RELATION[day_wuxing]["克"]:
+            score -= 0.3  # 号码五行克日柱五行
+        elif num_wuxing == WUXING_RELATION[day_wuxing]["被克"]:
+            score -= 0.2  # 日柱五行克号码五行
+
+    # 2. 地支与生肖的刑冲合害
+    zhi_to_zodiac = {"子": "鼠", "丑": "牛", "寅": "虎", "卯": "兔",
+                     "辰": "龙", "巳": "蛇", "午": "马", "未": "羊",
+                     "申": "猴", "酉": "鸡", "戌": "狗", "亥": "猪"}
+    day_zodiac = zhi_to_zodiac.get(day_zhi, "")
+
+    if ZODIAC_CLASH.get(zodiac) == day_zodiac:
+        score -= 0.5  # 相冲
+    if ZODIAC_HARMONY.get(zodiac) == day_zodiac:
+        score += 0.5  # 六合
+
+    # 3. 三合局简化加分
+    triples = [("申", "子", "辰"), ("亥", "卯", "未"), ("寅", "午", "戌"), ("巳", "酉", "丑")]
+    for triple in triples:
+        if day_zhi in triple and zodiac in [zhi_to_zodiac[z] for z in triple if z != day_zhi]:
+            score += 0.3
+            break
+
+    return score
 
 
 # -------------------- 数据库操作 --------------------
@@ -268,9 +407,9 @@ def upsert_draw(conn: sqlite3.Connection, record: DrawRecord, source: str) -> st
         return "inserted"
 
 
-# -------------------- 数据获取与交叉验证 --------------------
+# -------------------- 数据获取（香港六合彩） --------------------
 def fetch_from_url(url: str, timeout: int = 20) -> Optional[str]:
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; marksix-ultimate/1.0)"})
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; marksix-fengshui/1.0)"})
     try:
         with urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8-sig")
@@ -421,14 +560,12 @@ def find_optimal_weights(
     base_weights: Dict[str, float],
     test_window: int = 30
 ) -> Dict[str, float]:
-    """在基础权重附近搜索，返回使回测命中数最大化的权重组合"""
     if len(draws) < test_window + 10:
         return base_weights
 
     best_weights = base_weights.copy()
     best_hits = 0.0
 
-    # 在基础值 ±0.15 范围内搜索
     for dw_freq in [-0.10, 0.0, 0.10]:
         for dw_omit in [-0.10, 0.0, 0.10]:
             w_freq = base_weights["w_freq"] + dw_freq
@@ -442,7 +579,6 @@ def find_optimal_weights(
             for i in range(test_window, len(draws)):
                 past_draws = draws[:i]
                 past_specials = specials[:i]
-                # 使用临时权重生成预测
                 score_obj = generate_strategy_score_with_weights(
                     past_draws, past_specials, {"w_freq": w_freq, "w_omit": w_omit, "w_mom": w_mom}
                 )
@@ -463,7 +599,6 @@ def generate_strategy_score_with_weights(
     specials: List[int],
     weights: Dict[str, float]
 ) -> StrategyScore:
-    """使用指定权重生成策略得分（用于动态优化）"""
     freq = {n: 0.0 for n in ALL_NUMBERS}
     for d in draws:
         for n in d:
@@ -499,13 +634,12 @@ def generate_strategy_score_with_weights(
             + mom_n[n] * weights["w_mom"]
         )
 
-    # 简化选号：取前6名（回测时快速）
     main_picks = [n for n, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:6]]
     special = max(scores, key=lambda n: scores[n])
     return StrategyScore(main_picks, special, 0.0, scores)
 
 
-# -------------------- 智能过滤（增强版）--------------------
+# -------------------- 智能过滤 --------------------
 def smart_filter(nums: List[int]) -> bool:
     if len(nums) != 6:
         return False
@@ -548,17 +682,36 @@ def smart_filter(nums: List[int]) -> bool:
     return True
 
 
-# -------------------- 蒙特卡洛选号（稳定性增强）--------------------
-def monte_carlo_pick(
+# -------------------- 蒙特卡洛选号（融合玄学）--------------------
+def monte_carlo_pick_fengshui(
     scores: Dict[int, float],
     pair_lift: Dict[Tuple[int, int], float],
+    day_gan: str,
+    day_zhi: str,
+    day_wuxing: str,
     trials: int = MONTE_CARLO_TRIALS,
     fixed_seed: bool = True,
 ) -> List[int]:
     if fixed_seed:
         random.seed(42)
 
-    candidates = [n for n, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:35]]
+    # 计算玄学得分
+    fengshui_scores = {n: calculate_fengshui_score(n, day_gan, day_zhi, day_wuxing) for n in ALL_NUMBERS}
+    # 归一化统计得分和玄学得分
+    def normalize(d):
+        vals = list(d.values())
+        mn, mx = min(vals), max(vals)
+        if mx == mn:
+            return {k: 0.0 for k in d}
+        return {k: (v - mn) / (mx - mn) for k, v in d.items()}
+    
+    stat_norm = normalize(scores)
+    fengshui_norm = normalize(fengshui_scores)
+    
+    # 融合得分
+    final_scores = {n: stat_norm[n] * STAT_WEIGHT + fengshui_norm[n] * FENGSHUI_WEIGHT for n in ALL_NUMBERS}
+
+    candidates = [n for n, _ in sorted(final_scores.items(), key=lambda x: x[1], reverse=True)[:35]]
     combo_counter = Counter()
     best_combo = []
     best_score = -1e9
@@ -567,7 +720,7 @@ def monte_carlo_pick(
         combo = sorted(random.sample(candidates, 6))
         if not smart_filter(combo):
             continue
-        score = sum(scores[n] for n in combo)
+        score = sum(final_scores[n] for n in combo)
         for a, b in combinations(combo, 2):
             score += pair_lift.get((a, b), 0) * 0.2
         combo_counter[tuple(combo)] += 1
@@ -580,7 +733,7 @@ def monte_carlo_pick(
     elif best_combo:
         return best_combo
     else:
-        return [n for n, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:6]]
+        return [n for n, _ in sorted(final_scores.items(), key=lambda x: x[1], reverse=True)[:6]]
 
 
 # -------------------- 特别号马尔可夫模型 --------------------
@@ -603,12 +756,15 @@ class SpecialMarkovModel:
         return max(set(recent), key=recent.count)
 
 
-# -------------------- 策略核心 --------------------
-def generate_strategy_score(
+# -------------------- 策略核心（玄学融合）--------------------
+def generate_strategy_score_fengshui(
     draws: List[List[int]],
     specials: List[int],
     strategy: str,
     pair_lift: Dict[Tuple[int, int], float],
+    day_gan: str,
+    day_zhi: str,
+    day_wuxing: str,
     use_dynamic_weights: bool = True
 ) -> StrategyScore:
     base_cfg = STRATEGY_CONFIGS.get(strategy, STRATEGY_CONFIGS["balanced"])
@@ -653,9 +809,9 @@ def generate_strategy_score(
         )
 
     if strategy == "ensemble":
-        return ensemble_vote(draws, specials, pair_lift, use_dynamic_weights)
+        return ensemble_vote_fengshui(draws, specials, pair_lift, day_gan, day_zhi, day_wuxing, use_dynamic_weights)
 
-    main_picks = monte_carlo_pick(scores, pair_lift)
+    main_picks = monte_carlo_pick_fengshui(scores, pair_lift, day_gan, day_zhi, day_wuxing)
 
     markov = SpecialMarkovModel(2)
     markov.train(specials)
@@ -667,12 +823,13 @@ def generate_strategy_score(
     return StrategyScore(main_picks, special_pick, confidence, scores)
 
 
-def ensemble_vote(
-    draws: List[List[int]], specials: List[int], pair_lift: Dict, use_dynamic_weights: bool = True
+def ensemble_vote_fengshui(
+    draws: List[List[int]], specials: List[int], pair_lift: Dict,
+    day_gan: str, day_zhi: str, day_wuxing: str, use_dynamic_weights: bool = True
 ) -> StrategyScore:
     scores_list = []
     for s in ["hot", "cold", "momentum", "balanced", "pattern"]:
-        score_obj = generate_strategy_score(draws, specials, s, pair_lift, use_dynamic_weights)
+        score_obj = generate_strategy_score_fengshui(draws, specials, s, pair_lift, day_gan, day_zhi, day_wuxing, use_dynamic_weights)
         scores_list.append(score_obj.raw_scores)
     votes = {n: 0.0 for n in ALL_NUMBERS}
     for sc in scores_list:
@@ -680,7 +837,7 @@ def ensemble_vote(
         for rank, (n, _) in enumerate(ranked):
             votes[n] += 49 - rank
     norm_votes = {n: v / max(votes.values()) for n, v in votes.items()}
-    main_picks = monte_carlo_pick(norm_votes, pair_lift)
+    main_picks = monte_carlo_pick_fengshui(norm_votes, pair_lift, day_gan, day_zhi, day_wuxing)
     special = SpecialMarkovModel(2)
     special.train(specials)
     sp = special.predict(specials[-5:])
@@ -703,8 +860,10 @@ def run_rolling_backtest(conn: sqlite3.Connection, window: int = 100, step: int 
         train_draws = all_draws[max(0, i-window):i]
         train_specials = all_specials[max(0, i-window):i]
         pair_lift = calculate_pair_lift(train_draws)
+        today = date.today()
+        day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
         for strat in STRATEGY_IDS:
-            score = generate_strategy_score(train_draws, train_specials, strat, pair_lift, use_dynamic_weights=True)
+            score = generate_strategy_score_fengshui(train_draws, train_specials, strat, pair_lift, day_gan, day_zhi, day_wuxing, use_dynamic_weights=True)
             hits = len(set(score.main_picks) & set(all_draws[i]))
             special_hit = 1 if score.special_pick == all_specials[i] else 0
             results[strat].append((hits, special_hit, score.confidence))
@@ -749,7 +908,6 @@ def review_latest(conn: sqlite3.Connection) -> int:
 
 # -------------------- 概率计算工具 --------------------
 def wilson_interval(hits: int, total: int, z: float = 1.96) -> Tuple[float, float]:
-    """威尔逊置信区间，返回 (下限%, 上限%)"""
     if total == 0:
         return (0.0, 0.0)
     p = hits / total
@@ -763,7 +921,6 @@ def wilson_interval(hits: int, total: int, z: float = 1.96) -> Tuple[float, floa
 
 
 def bayesian_posterior(hits: int, total: int) -> float:
-    """贝叶斯后验概率 (使用Beta(1,1)先验)"""
     return (hits + 1) / (total + 49) * 100
 
 
@@ -789,11 +946,12 @@ def cmd_sync(args: argparse.Namespace) -> None:
     ins, upd = sync_draws(conn, records, "cross_validated")
     print(f"同步完成：新增 {ins} 期，更新 {upd} 期。")
     draws = get_recent_draws(conn, 300)
-    pair_lift = calculate_pair_lift(draws)
-    conn.execute("DELETE FROM pair_affinity")
-    for (a, b), lift in pair_lift.items():
-        conn.execute("INSERT INTO pair_affinity (num1, num2, lift, updated_at) VALUES (?,?,?,?)", (a, b, lift, utc_now()))
-    conn.commit()
+    if draws:
+        pair_lift = calculate_pair_lift(draws)
+        conn.execute("DELETE FROM pair_affinity")
+        for (a, b), lift in pair_lift.items():
+            conn.execute("INSERT INTO pair_affinity (num1, num2, lift, updated_at) VALUES (?,?,?,?)", (a, b, lift, utc_now()))
+        conn.commit()
     reviewed = review_latest(conn)
     if reviewed:
         print(f"已自动复盘 {reviewed} 个预测。")
@@ -812,8 +970,10 @@ def cmd_predict(args: argparse.Namespace) -> None:
     pair_lift = calculate_pair_lift(draws)
     latest = conn.execute("SELECT issue_no FROM draws ORDER BY draw_date DESC LIMIT 1").fetchone()
     next_issue = next_issue_number(latest[0]) if latest else "26/001"
+    today = date.today()
+    day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
     for strat in STRATEGY_IDS:
-        score = generate_strategy_score(draws, specials, strat, pair_lift, use_dynamic_weights=True)
+        score = generate_strategy_score_fengshui(draws, specials, strat, pair_lift, day_gan, day_zhi, day_wuxing, use_dynamic_weights=True)
         conn.execute("""
             INSERT OR REPLACE INTO predictions (issue_no, strategy, numbers_json, special_number, confidence, status, created_at)
             VALUES (?, ?, ?, ?, ?, 'PENDING', ?)
@@ -855,14 +1015,19 @@ def cmd_show(args: argparse.Namespace) -> None:
             strategy_name = STRATEGY_CONFIGS.get(s['strategy'], {}).get('name', s['strategy'])
             print(f"  {strategy_name}: 夏普比率={s['sharpe_ratio']:.2f} 平均命中={s['avg_hit']:.2f} ≥2码率={s['hit2_rate']*100:.1f}% 特别号率={s['special_rate']*100:.1f}%")
 
-    # ---------- 简洁投注推荐 ----------
+    # ---------- 玄学信息 ----------
+    today = date.today()
+    day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
+    print(f"\n📅 今日玄学: {today} {day_gan}{day_zhi}日 (五行{day_wuxing})")
+
+    # ---------- 投注推荐单 ----------
     print("\n" + "=" * 60)
-    print("🎯 本期投注推荐单 (基于集成投票策略 & 动态权重)")
+    print("🎯 本期投注推荐单 (统计+玄学融合，权重6:4)")
     print("=" * 60)
 
-    draws = get_recent_draws(conn, 100)
-    specials = get_recent_specials(conn, 100)
-    if len(draws) < 20:
+    draws = get_recent_draws(conn, PREDICT_WINDOW)
+    specials = get_recent_specials(conn, PREDICT_WINDOW)
+    if len(draws) < 10:
         print("历史数据不足，无法生成投注推荐。")
         conn.close()
         return
@@ -873,13 +1038,12 @@ def cmd_show(args: argparse.Namespace) -> None:
         picked_special = ensemble_pred["special_number"]
     else:
         pair_lift = calculate_pair_lift(draws)
-        score = ensemble_vote(draws, specials, pair_lift, use_dynamic_weights=True)
+        score = ensemble_vote_fengshui(draws, specials, pair_lift, day_gan, day_zhi, day_wuxing, use_dynamic_weights=True)
         picked_6 = score.main_picks
         picked_special = score.special_pick
 
     hot5 = picked_6[:5]
 
-    # 生肖热度 (近5期)
     zodiac_score = Counter()
     for draw in draws[-5:]:
         for n in draw:
@@ -902,8 +1066,8 @@ def cmd_show(args: argparse.Namespace) -> None:
     rate1 = zodiac_hit_rate(top1)
     rate2 = zodiac_hit_rate(top2)
 
-    # 输出基本信息
-    print(f"📅 参考期号: {pending[0]['issue_no'] if pending else next_issue_number(latest['issue_no'])}")
+    next_issue_str = pending[0]['issue_no'] if pending else (next_issue_number(latest['issue_no']) if latest else "未知")
+    print(f"📅 参考期号: {next_issue_str}")
     print("-" * 60)
     print(f"🐉 最强生肖: {top1}  (近5期命中率 {rate1:.0f}%)")
     print(f"🐉 次强生肖: {top2}  (近5期命中率 {rate2:.0f}%)")
@@ -917,11 +1081,11 @@ def cmd_show(args: argparse.Namespace) -> None:
 
     print(f"🔮 特别号 (首选): {picked_special:02d} ({special_zod})")
 
-    # ---------- 特别号6码推荐 ----------
+    # 特别号6码推荐
     pair_lift = calculate_pair_lift(draws)
     scores_list = []
     for s in ["hot", "cold", "momentum", "balanced", "pattern"]:
-        score_obj = generate_strategy_score(draws, specials, s, pair_lift, use_dynamic_weights=True)
+        score_obj = generate_strategy_score_fengshui(draws, specials, s, pair_lift, day_gan, day_zhi, day_wuxing, use_dynamic_weights=True)
         scores_list.append(score_obj.raw_scores)
 
     special_scores = {n: 0.0 for n in ALL_NUMBERS}
@@ -959,11 +1123,113 @@ def cmd_show(args: argparse.Namespace) -> None:
     top6_specials = sorted(special_scores.items(), key=lambda x: x[1], reverse=True)[:6]
 
     print("\n🔯 特别号6码推荐 (按综合评分排序):")
+    special_lines = []
     for i, (num, score) in enumerate(top6_specials, 1):
-        print(f"   {i}. {num:02d} ({get_zodiac(num)})  ─ 综合评分: {score*100:.1f}%")
+        line = f"   {i}. {num:02d} ({get_zodiac(num)})  ─ 综合评分: {score*100:.1f}%"
+        print(line)
+        special_lines.append(line.strip())
+
+    # 三中三推荐
+    best_combo = None
+    combo_hits_dict = {}
+    if len(hot5) >= 3:
+        print("\n🎰 三中三推荐 (从正码5个组合生成，共10组):")
+        three_combos = list(combinations(sorted(hot5), 3))
+        for combo in three_combos:
+            hits = 0
+            for draw in draws[-30:]:
+                if all(n in draw for n in combo):
+                    hits += 1
+            combo_hits_dict[combo] = hits
+        for i, combo in enumerate(three_combos, 1):
+            hits = combo_hits_dict[combo]
+            prob = hits / 30 * 100 if draws else 0
+            combo_str = " ".join(f"{n:02d}({get_zodiac(n)})" for n in combo)
+            print(f"   {i:2d}. {combo_str}  ─ 近30期同时出现 {hits} 次 ({prob:.1f}%)")
+
+        if combo_hits_dict:
+            best_combo = max(three_combos, key=lambda c: (combo_hits_dict[c], -three_combos.index(c)))
+            best_hits = combo_hits_dict[best_combo]
+            best_prob = best_hits / 30 * 100 if draws else 0
+            best_combo_str = " ".join(f"{n:02d}({get_zodiac(n)})" for n in best_combo)
+            print(f"\n🏆 极强推荐组合: {best_combo_str}")
+            print(f"   近30期同时出现 {best_hits} 次 ({best_prob:.1f}%)，是近期最稳定的三码组合。")
+
+    # 最近7期特别号命中统计
+    strat_stats_summary = []
+    recent_7_rows = conn.execute("""
+        SELECT issue_no, special_number FROM draws 
+        ORDER BY draw_date DESC, issue_no DESC LIMIT 7
+    """).fetchall()
+    if len(recent_7_rows) >= 3:
+        print("\n📊 最近7期特别号策略命中统计:")
+        recent_7 = list(reversed(recent_7_rows))
+        strat_special_stats = {s: {"hits": 0, "total": 0} for s in STRATEGY_IDS}
+        for row in recent_7:
+            issue = row["issue_no"]
+            winning_special = row["special_number"]
+            for s in STRATEGY_IDS:
+                pred = conn.execute("""
+                    SELECT special_number FROM predictions 
+                    WHERE issue_no = ? AND strategy = ? AND status = 'REVIEWED'
+                """, (issue, s)).fetchone()
+                if pred:
+                    strat_special_stats[s]["total"] += 1
+                    if pred["special_number"] == winning_special:
+                        strat_special_stats[s]["hits"] += 1
+        print(f"  {'策略':<12} {'命中/总数':<8} {'命中率':<8}")
+        print("  " + "-" * 30)
+        for s in STRATEGY_IDS:
+            stats = strat_special_stats[s]
+            total = stats["total"]
+            if total == 0:
+                continue
+            hits = stats["hits"]
+            rate = hits / total * 100
+            strategy_name = STRATEGY_CONFIGS.get(s, {}).get('name', s)
+            line = f"  {strategy_name:<12} {hits}/{total:<6} {rate:.0f}%"
+            print(line)
+            strat_stats_summary.append(f"{strategy_name}:{hits}/{total}({rate:.0f}%)")
+    else:
+        print("\n最近7期数据不足，无法显示特别号命中统计。")
 
     print("=" * 60)
     print("⚠️ 数据仅供参考，理性投注。")
+
+    # 微信推送
+    push_lines = []
+    push_lines.append(f"【香港六合彩预测】{next_issue_str}")
+    push_lines.append(f"今日{day_gan}{day_zhi}日 五行{day_wuxing}")
+    push_lines.append("")
+    push_lines.append(f"🐉 最强生肖: {top1} ({rate1:.0f}%)  次强: {top2} ({rate2:.0f}%)")
+    push_lines.append("")
+    push_lines.append("🎲 正码5个 (威尔逊区间 / 后验概率):")
+    for n in hot5:
+        hits_30 = sum(1 for draw in draws[-30:] if n in draw)
+        low, high = wilson_interval(hits_30, 30)
+        posterior = bayesian_posterior(hits_30, 30)
+        push_lines.append(f"   {n:02d} ({get_zodiac(n)})  [{low:.0f}%-{high:.0f}%]  {posterior:.1f}%")
+    push_lines.append("")
+    push_lines.append(f"🔮 特别号首选: {picked_special:02d} ({special_zod})")
+    push_lines.append("")
+    if special_lines:
+        push_lines.append("🔯 特别号6码排名:")
+        for line in special_lines[:6]:
+            push_lines.append(line)
+    push_lines.append("")
+    if best_combo:
+        best_hits = combo_hits_dict[best_combo]
+        best_prob = best_hits / 30 * 100 if draws else 0
+        push_lines.append(f"🏆 极强三中三: {' '.join(f'{n:02d}' for n in best_combo)}")
+        push_lines.append(f"   近30期同时出现 {best_hits} 次 ({best_prob:.1f}%)")
+    push_lines.append("")
+    if strat_stats_summary:
+        push_lines.append("📊 最近7期特别号命中率:")
+        for summary in strat_stats_summary:
+            push_lines.append(f"   {summary}")
+
+    push_content = "\n".join(push_lines)
+    send_pushplus_notification("香港六合彩预测(玄学版)", push_content)
 
     conn.close()
 
@@ -978,7 +1244,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="香港六合彩终极科学版")
+    parser = argparse.ArgumentParser(description="香港六合彩玄学融合终极版")
     parser.add_argument("--db", default=DB_PATH_DEFAULT, help="数据库路径")
     sub = parser.add_subparsers(dest="command", required=True)
 
