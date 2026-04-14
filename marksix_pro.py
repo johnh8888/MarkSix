@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-香港六合彩 - 玄学融合终极版（内置五行八字 + 日历冲煞 + 动态权重 + 蒙特卡洛）
+香港六合彩 - 玄学融合终极版（基于北京时间推算五行冲煞）
 用法:
     python marksix_ultimate.py sync
     python marksix_ultimate.py predict
@@ -108,14 +108,13 @@ COLOR_MAP = {
 ALL_NUMBERS = list(range(1, 50))
 MONTE_CARLO_TRIALS = CONFIG.get("monte_carlo_trials", 5000)
 SUM_TARGET = CONFIG.get("sum_target", (115, 185))
-PREDICT_WINDOW = CONFIG.get("predict_window", 30)  # 用于投注推荐的历史期数
+PREDICT_WINDOW = CONFIG.get("predict_window", 30)
 
 # 统计与玄学的融合权重
 STAT_WEIGHT = 0.6
 FENGSHUI_WEIGHT = 0.4
 
 # -------------------- 玄学映射表 --------------------
-# 号码五行
 WUXING_NUM_MAP = {
     "金": [4,5,12,13,20,21,28,29,36,37,44,45],
     "木": [1,8,9,16,17,24,25,32,33,40,41,48,49],
@@ -124,14 +123,12 @@ WUXING_NUM_MAP = {
     "土": [5,6,13,14,21,22,29,30,37,38,45,46]
 }
 
-# 生肖五行属性
 ZODIAC_WUXING = {
     "鼠": "水", "牛": "土", "虎": "木", "兔": "木",
     "龙": "土", "蛇": "火", "马": "火", "羊": "土",
     "猴": "金", "鸡": "金", "狗": "土", "猪": "水"
 }
 
-# 生肖六冲
 ZODIAC_CLASH = {
     "鼠": "马", "马": "鼠",
     "牛": "羊", "羊": "牛",
@@ -141,7 +138,6 @@ ZODIAC_CLASH = {
     "蛇": "猪", "猪": "蛇"
 }
 
-# 生肖六合
 ZODIAC_HARMONY = {
     "鼠": "牛", "牛": "鼠",
     "虎": "猪", "猪": "虎",
@@ -151,7 +147,6 @@ ZODIAC_HARMONY = {
     "马": "羊", "羊": "马"
 }
 
-# 五行生克关系
 WUXING_RELATION = {
     "金": {"生": "水", "克": "木", "被生": "土", "被克": "火"},
     "木": {"生": "火", "克": "土", "被生": "水", "被克": "金"},
@@ -197,6 +192,14 @@ def send_pushplus_notification(title: str, content: str) -> bool:
     except Exception as e:
         print(f"❌ 推送异常: {e}")
     return False
+
+
+# -------------------- 北京时间获取 --------------------
+def get_beijing_date() -> date:
+    """获取北京时间当天的日期"""
+    utc_now = datetime.now(timezone.utc)
+    beijing_now = utc_now + timedelta(hours=8)
+    return beijing_now.date()
 
 
 # -------------------- 工具函数 --------------------
@@ -256,29 +259,26 @@ def calculate_fengshui_score(num: int, day_gan: str, day_zhi: str, day_wuxing: s
     zodiac = get_zodiac(num)
     num_wuxing = get_num_wuxing(num)
 
-    # 1. 五行生克（与日五行）
     if num_wuxing and day_wuxing:
         if num_wuxing == WUXING_RELATION[day_wuxing]["生"]:
-            score += 0.3  # 号码五行生日柱五行
+            score += 0.3
         elif num_wuxing == WUXING_RELATION[day_wuxing]["被生"]:
-            score += 0.2  # 日柱五行生号码五行
+            score += 0.2
         elif num_wuxing == WUXING_RELATION[day_wuxing]["克"]:
-            score -= 0.3  # 号码五行克日柱五行
+            score -= 0.3
         elif num_wuxing == WUXING_RELATION[day_wuxing]["被克"]:
-            score -= 0.2  # 日柱五行克号码五行
+            score -= 0.2
 
-    # 2. 地支与生肖的刑冲合害
     zhi_to_zodiac = {"子": "鼠", "丑": "牛", "寅": "虎", "卯": "兔",
                      "辰": "龙", "巳": "蛇", "午": "马", "未": "羊",
                      "申": "猴", "酉": "鸡", "戌": "狗", "亥": "猪"}
     day_zodiac = zhi_to_zodiac.get(day_zhi, "")
 
     if ZODIAC_CLASH.get(zodiac) == day_zodiac:
-        score -= 0.5  # 相冲
+        score -= 0.5
     if ZODIAC_HARMONY.get(zodiac) == day_zodiac:
-        score += 0.5  # 六合
+        score += 0.5
 
-    # 3. 三合局简化加分
     triples = [("申", "子", "辰"), ("亥", "卯", "未"), ("寅", "午", "戌"), ("巳", "酉", "丑")]
     for triple in triples:
         if day_zhi in triple and zodiac in [zhi_to_zodiac[z] for z in triple if z != day_zhi]:
@@ -695,9 +695,7 @@ def monte_carlo_pick_fengshui(
     if fixed_seed:
         random.seed(42)
 
-    # 计算玄学得分
     fengshui_scores = {n: calculate_fengshui_score(n, day_gan, day_zhi, day_wuxing) for n in ALL_NUMBERS}
-    # 归一化统计得分和玄学得分
     def normalize(d):
         vals = list(d.values())
         mn, mx = min(vals), max(vals)
@@ -708,7 +706,6 @@ def monte_carlo_pick_fengshui(
     stat_norm = normalize(scores)
     fengshui_norm = normalize(fengshui_scores)
     
-    # 融合得分
     final_scores = {n: stat_norm[n] * STAT_WEIGHT + fengshui_norm[n] * FENGSHUI_WEIGHT for n in ALL_NUMBERS}
 
     candidates = [n for n, _ in sorted(final_scores.items(), key=lambda x: x[1], reverse=True)[:35]]
@@ -860,7 +857,7 @@ def run_rolling_backtest(conn: sqlite3.Connection, window: int = 100, step: int 
         train_draws = all_draws[max(0, i-window):i]
         train_specials = all_specials[max(0, i-window):i]
         pair_lift = calculate_pair_lift(train_draws)
-        today = date.today()
+        today = get_beijing_date()
         day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
         for strat in STRATEGY_IDS:
             score = generate_strategy_score_fengshui(train_draws, train_specials, strat, pair_lift, day_gan, day_zhi, day_wuxing, use_dynamic_weights=True)
@@ -970,7 +967,7 @@ def cmd_predict(args: argparse.Namespace) -> None:
     pair_lift = calculate_pair_lift(draws)
     latest = conn.execute("SELECT issue_no FROM draws ORDER BY draw_date DESC LIMIT 1").fetchone()
     next_issue = next_issue_number(latest[0]) if latest else "26/001"
-    today = date.today()
+    today = get_beijing_date()
     day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
     for strat in STRATEGY_IDS:
         score = generate_strategy_score_fengshui(draws, specials, strat, pair_lift, day_gan, day_zhi, day_wuxing, use_dynamic_weights=True)
@@ -1015,10 +1012,10 @@ def cmd_show(args: argparse.Namespace) -> None:
             strategy_name = STRATEGY_CONFIGS.get(s['strategy'], {}).get('name', s['strategy'])
             print(f"  {strategy_name}: 夏普比率={s['sharpe_ratio']:.2f} 平均命中={s['avg_hit']:.2f} ≥2码率={s['hit2_rate']*100:.1f}% 特别号率={s['special_rate']*100:.1f}%")
 
-    # ---------- 玄学信息 ----------
-    today = date.today()
+    # ---------- 玄学信息（基于北京时间） ----------
+    today = get_beijing_date()
     day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
-    print(f"\n📅 今日玄学: {today} {day_gan}{day_zhi}日 (五行{day_wuxing})")
+    print(f"\n📅 今日玄学 (北京时间): {today} {day_gan}{day_zhi}日 (五行{day_wuxing})")
 
     # ---------- 投注推荐单 ----------
     print("\n" + "=" * 60)
@@ -1196,10 +1193,10 @@ def cmd_show(args: argparse.Namespace) -> None:
     print("=" * 60)
     print("⚠️ 数据仅供参考，理性投注。")
 
-    # 微信推送
+    # 微信推送（包含玄学信息）
     push_lines = []
     push_lines.append(f"【香港六合彩预测】{next_issue_str}")
-    push_lines.append(f"今日{day_gan}{day_zhi}日 五行{day_wuxing}")
+    push_lines.append(f"今日{day_gan}{day_zhi}日 五行{day_wuxing} (北京时间)")
     push_lines.append("")
     push_lines.append(f"🐉 最强生肖: {top1} ({rate1:.0f}%)  次强: {top2} ({rate2:.0f}%)")
     push_lines.append("")
