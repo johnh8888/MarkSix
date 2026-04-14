@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-香港六合彩 - 玄学融合终极版（基于北京时间推算五行冲煞）
+香港六合彩 - 
 用法:
     python marksix_ultimate.py sync
     python marksix_ultimate.py predict
