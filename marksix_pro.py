@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-香港六合彩 - 专业级终极版 (全中文 + 稳定性增强 + 过滤优化)
-功能：
-- 多数据源交叉验证与自动补全
-- 指数衰减动量 + 关联规则挖掘 (Lift)
-- 蒙特卡洛组合优化 (固定种子稳定输出)
-- 增强过滤：质数/波色/和值/奇偶/区间约束
-- 特别号独立二阶马尔可夫链
-- 滚动窗口回测 + 夏普比率评估
-- 配置文件支持 (YAML) + 日志系统
-
-用法:
-    python marksix_pro.py sync [--third-party-url ...]
-    python marksix_pro.py predict
-    python marksix_pro.py show
-    python marksix_pro.py backtest
+香港六合彩 
+    python marksix_ultimate.py sync
+    python marksix_ultimate.py predict
+    python marksix_ultimate.py show
+    python marksix_ultimate.py backtest
 """
 
 import argparse
@@ -38,7 +28,6 @@ from urllib.request import Request, urlopen
 # -------------------- 配置文件处理 --------------------
 try:
     import yaml
-
     CONFIG_PATH = Path(__file__).with_suffix(".yaml")
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -55,11 +44,11 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("marksix_pro")
+logger = logging.getLogger("marksix_ultimate")
 
 # -------------------- 常量与配置 --------------------
 SCRIPT_DIR = Path(__file__).resolve().parent
-DB_PATH_DEFAULT = str(SCRIPT_DIR / CONFIG.get("db_name", "marksix_pro.db"))
+DB_PATH_DEFAULT = str(SCRIPT_DIR / CONFIG.get("db_name", "marksix_ultimate.db"))
 
 OFFICIAL_URL = CONFIG.get(
     "official_url", "https://bet.hkjc.com/contentserver/jcbw/cmc/last30draw.json"
@@ -73,14 +62,14 @@ THIRD_PARTY_URLS_DEFAULT = CONFIG.get(
 )
 THIRD_PARTY_MAX_PAGES_DEFAULT = CONFIG.get("third_party_max_pages", 60)
 
-# 策略配置 (全中文名称)
+# 策略基础权重模板 (动态优化将在此基础上微调)
 STRATEGY_CONFIGS = {
-    "hot": {"name": "热号策略", "w_freq": 0.7, "w_omit": 0.0, "w_mom": 0.3, "w_pair": 0.0},
-    "cold": {"name": "冷号回补", "w_freq": 0.0, "w_omit": 0.7, "w_mom": 0.3, "w_pair": 0.0},
-    "momentum": {"name": "近期动量", "w_freq": 0.2, "w_omit": 0.0, "w_mom": 0.8, "w_pair": 0.0},
-    "balanced": {"name": "组合策略", "w_freq": 0.35, "w_omit": 0.25, "w_mom": 0.25, "w_pair": 0.15},
-    "pattern": {"name": "规律挖掘", "w_freq": 0.30, "w_omit": 0.30, "w_mom": 0.20, "w_pair": 0.20},
-    "ensemble": {"name": "集成投票", "w_freq": 0.30, "w_omit": 0.30, "w_mom": 0.20, "w_pair": 0.20},
+    "hot": {"name": "热号策略", "w_freq": 0.7, "w_omit": 0.0, "w_mom": 0.3},
+    "cold": {"name": "冷号回补", "w_freq": 0.0, "w_omit": 0.7, "w_mom": 0.3},
+    "momentum": {"name": "近期动量", "w_freq": 0.2, "w_omit": 0.0, "w_mom": 0.8},
+    "balanced": {"name": "组合策略", "w_freq": 0.35, "w_omit": 0.25, "w_mom": 0.25},
+    "pattern": {"name": "规律挖掘", "w_freq": 0.30, "w_omit": 0.30, "w_mom": 0.20},
+    "ensemble": {"name": "集成投票", "w_freq": 0.30, "w_omit": 0.30, "w_mom": 0.20},
 }
 STRATEGY_IDS = ["hot", "cold", "momentum", "balanced", "ensemble", "pattern"]
 
@@ -109,7 +98,7 @@ COLOR_MAP = {
 
 ALL_NUMBERS = list(range(1, 50))
 
-MONTE_CARLO_TRIALS = CONFIG.get("monte_carlo_trials", 2000)
+MONTE_CARLO_TRIALS = CONFIG.get("monte_carlo_trials", 5000)  # 提升至5000
 SUM_TARGET = CONFIG.get("sum_target", (115, 185))
 
 
@@ -281,7 +270,7 @@ def upsert_draw(conn: sqlite3.Connection, record: DrawRecord, source: str) -> st
 
 # -------------------- 数据获取与交叉验证 --------------------
 def fetch_from_url(url: str, timeout: int = 20) -> Optional[str]:
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; marksix-pro/1.0)"})
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; marksix-ultimate/1.0)"})
     try:
         with urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8-sig")
@@ -425,6 +414,97 @@ def calculate_pair_lift(draws: List[List[int]]) -> Dict[Tuple[int, int], float]:
     return lift_map
 
 
+# -------------------- 动态权重优化 --------------------
+def find_optimal_weights(
+    draws: List[List[int]],
+    specials: List[int],
+    base_weights: Dict[str, float],
+    test_window: int = 30
+) -> Dict[str, float]:
+    """在基础权重附近搜索，返回使回测命中数最大化的权重组合"""
+    if len(draws) < test_window + 10:
+        return base_weights
+
+    best_weights = base_weights.copy()
+    best_hits = 0.0
+
+    # 在基础值 ±0.15 范围内搜索
+    for dw_freq in [-0.10, 0.0, 0.10]:
+        for dw_omit in [-0.10, 0.0, 0.10]:
+            w_freq = base_weights["w_freq"] + dw_freq
+            w_omit = base_weights["w_omit"] + dw_omit
+            w_mom = 1.0 - w_freq - w_omit
+            if w_freq < 0.1 or w_omit < 0.0 or w_mom < 0.1 or w_mom > 0.6:
+                continue
+
+            total_hits = 0
+            count = 0
+            for i in range(test_window, len(draws)):
+                past_draws = draws[:i]
+                past_specials = specials[:i]
+                # 使用临时权重生成预测
+                score_obj = generate_strategy_score_with_weights(
+                    past_draws, past_specials, {"w_freq": w_freq, "w_omit": w_omit, "w_mom": w_mom}
+                )
+                actual = set(draws[i])
+                total_hits += len(set(score_obj.main_picks) & actual)
+                count += 1
+
+            avg_hits = total_hits / count if count else 0
+            if avg_hits > best_hits:
+                best_hits = avg_hits
+                best_weights = {"w_freq": w_freq, "w_omit": w_omit, "w_mom": w_mom}
+
+    return best_weights
+
+
+def generate_strategy_score_with_weights(
+    draws: List[List[int]],
+    specials: List[int],
+    weights: Dict[str, float]
+) -> StrategyScore:
+    """使用指定权重生成策略得分（用于动态优化）"""
+    freq = {n: 0.0 for n in ALL_NUMBERS}
+    for d in draws:
+        for n in d:
+            freq[n] += 1.0
+
+    omit = {}
+    for n in ALL_NUMBERS:
+        for i, d in enumerate(draws):
+            if n in d:
+                omit[n] = i
+                break
+        else:
+            omit[n] = len(draws)
+
+    mom = calculate_exp_momentum(draws)
+
+    def norm(d):
+        vals = list(d.values())
+        mn, mx = min(vals), max(vals)
+        if mx == mn:
+            return {k: 0.0 for k in d}
+        return {k: (v - mn) / (mx - mn) for k, v in d.items()}
+
+    freq_n = norm(freq)
+    omit_n = norm({n: 1.0 / (omit[n] + 1) for n in ALL_NUMBERS})
+    mom_n = norm(mom)
+
+    scores = {}
+    for n in ALL_NUMBERS:
+        scores[n] = (
+            freq_n[n] * weights["w_freq"]
+            + omit_n[n] * weights["w_omit"]
+            + mom_n[n] * weights["w_mom"]
+        )
+
+    # 简化选号：取前6名（回测时快速）
+    main_picks = [n for n, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:6]]
+    special = max(scores, key=lambda n: scores[n])
+    return StrategyScore(main_picks, special, 0.0, scores)
+
+
 # -------------------- 智能过滤（增强版）--------------------
 def smart_filter(nums: List[int]) -> bool:
     if len(nums) != 6:
@@ -454,12 +534,10 @@ def smart_filter(nums: List[int]) -> bool:
             consec = 1
     if max_consec > 3:
         return False
-    # 质数约束
     primes = {2,3,5,7,11,13,17,19,23,29,31,37,41,43,47}
     prime_count = sum(1 for n in s if n in primes)
     if prime_count == 0 or prime_count == 6:
         return False
-    # 波色约束
     color_counts = {c: 0 for c in COLOR_MAP}
     for n in s:
         for c, nums in COLOR_MAP.items():
@@ -497,10 +575,8 @@ def monte_carlo_pick(
             best_score = score
             best_combo = combo
 
-    # 取出现次数最多的组合（稳定性优先）
     if combo_counter:
-        most_common = combo_counter.most_common(1)[0][0]
-        return list(most_common)
+        return list(combo_counter.most_common(1)[0][0])
     elif best_combo:
         return best_combo
     else:
@@ -533,8 +609,14 @@ def generate_strategy_score(
     specials: List[int],
     strategy: str,
     pair_lift: Dict[Tuple[int, int], float],
+    use_dynamic_weights: bool = True
 ) -> StrategyScore:
-    cfg = STRATEGY_CONFIGS.get(strategy, STRATEGY_CONFIGS["balanced"])
+    base_cfg = STRATEGY_CONFIGS.get(strategy, STRATEGY_CONFIGS["balanced"])
+    weights = {"w_freq": base_cfg["w_freq"], "w_omit": base_cfg["w_omit"], "w_mom": base_cfg["w_mom"]}
+
+    if use_dynamic_weights and strategy != "ensemble" and len(draws) >= 40:
+        weights = find_optimal_weights(draws, specials, weights)
+
     freq = {n: 0.0 for n in ALL_NUMBERS}
     for d in draws:
         for n in d:
@@ -565,13 +647,13 @@ def generate_strategy_score(
     scores = {}
     for n in ALL_NUMBERS:
         scores[n] = (
-            freq_n[n] * cfg["w_freq"]
-            + omit_n[n] * cfg["w_omit"]
-            + mom_n[n] * cfg["w_mom"]
+            freq_n[n] * weights["w_freq"]
+            + omit_n[n] * weights["w_omit"]
+            + mom_n[n] * weights["w_mom"]
         )
 
     if strategy == "ensemble":
-        return ensemble_vote(draws, specials, pair_lift)
+        return ensemble_vote(draws, specials, pair_lift, use_dynamic_weights)
 
     main_picks = monte_carlo_pick(scores, pair_lift)
 
@@ -586,11 +668,12 @@ def generate_strategy_score(
 
 
 def ensemble_vote(
-    draws: List[List[int]], specials: List[int], pair_lift: Dict
+    draws: List[List[int]], specials: List[int], pair_lift: Dict, use_dynamic_weights: bool = True
 ) -> StrategyScore:
     scores_list = []
     for s in ["hot", "cold", "momentum", "balanced", "pattern"]:
-        scores_list.append(generate_strategy_score(draws, specials, s, pair_lift).raw_scores)
+        score_obj = generate_strategy_score(draws, specials, s, pair_lift, use_dynamic_weights)
+        scores_list.append(score_obj.raw_scores)
     votes = {n: 0.0 for n in ALL_NUMBERS}
     for sc in scores_list:
         ranked = sorted(sc.items(), key=lambda x: x[1], reverse=True)
@@ -621,7 +704,7 @@ def run_rolling_backtest(conn: sqlite3.Connection, window: int = 100, step: int 
         train_specials = all_specials[max(0, i-window):i]
         pair_lift = calculate_pair_lift(train_draws)
         for strat in STRATEGY_IDS:
-            score = generate_strategy_score(train_draws, train_specials, strat, pair_lift)
+            score = generate_strategy_score(train_draws, train_specials, strat, pair_lift, use_dynamic_weights=True)
             hits = len(set(score.main_picks) & set(all_draws[i]))
             special_hit = 1 if score.special_pick == all_specials[i] else 0
             results[strat].append((hits, special_hit, score.confidence))
@@ -662,6 +745,26 @@ def review_latest(conn: sqlite3.Connection) -> int:
         reviewed += 1
     conn.commit()
     return reviewed
+
+
+# -------------------- 概率计算工具 --------------------
+def wilson_interval(hits: int, total: int, z: float = 1.96) -> Tuple[float, float]:
+    """威尔逊置信区间，返回 (下限%, 上限%)"""
+    if total == 0:
+        return (0.0, 0.0)
+    p = hits / total
+    n = total
+    denominator = 1 + z**2 / n
+    centre = (p + z**2 / (2 * n)) / denominator
+    adjustment = z * math.sqrt(p * (1 - p) / n + z**2 / (4 * n**2)) / denominator
+    low = max(0.0, centre - adjustment) * 100
+    high = min(1.0, centre + adjustment) * 100
+    return (low, high)
+
+
+def bayesian_posterior(hits: int, total: int) -> float:
+    """贝叶斯后验概率 (使用Beta(1,1)先验)"""
+    return (hits + 1) / (total + 49) * 100
 
 
 # -------------------- 命令行接口 --------------------
@@ -710,7 +813,7 @@ def cmd_predict(args: argparse.Namespace) -> None:
     latest = conn.execute("SELECT issue_no FROM draws ORDER BY draw_date DESC LIMIT 1").fetchone()
     next_issue = next_issue_number(latest[0]) if latest else "26/001"
     for strat in STRATEGY_IDS:
-        score = generate_strategy_score(draws, specials, strat, pair_lift)
+        score = generate_strategy_score(draws, specials, strat, pair_lift, use_dynamic_weights=True)
         conn.execute("""
             INSERT OR REPLACE INTO predictions (issue_no, strategy, numbers_json, special_number, confidence, status, created_at)
             VALUES (?, ?, ?, ?, ?, 'PENDING', ?)
@@ -724,6 +827,7 @@ def cmd_show(args: argparse.Namespace) -> None:
     conn = connect_db(args.db)
     init_db(conn)
 
+    # ---------- 最新开奖 ----------
     latest = conn.execute("SELECT issue_no, draw_date, numbers_json, special_number FROM draws ORDER BY draw_date DESC LIMIT 1").fetchone()
     if latest:
         nums = json.loads(latest["numbers_json"])
@@ -731,6 +835,7 @@ def cmd_show(args: argparse.Namespace) -> None:
     else:
         print("暂无开奖数据。")
 
+    # ---------- 多策略推荐 ----------
     pending = conn.execute("SELECT issue_no, strategy, numbers_json, special_number, confidence FROM predictions WHERE status='PENDING' ORDER BY strategy").fetchall()
     if pending:
         print("\n本期多策略推荐 (6码池):")
@@ -742,6 +847,7 @@ def cmd_show(args: argparse.Namespace) -> None:
     else:
         print("\n暂无待开奖预测，请先运行 predict")
 
+    # ---------- 回测统计 ----------
     stats = conn.execute("SELECT * FROM backtest_stats ORDER BY sharpe_ratio DESC").fetchall()
     if stats:
         print("\n策略历史表现 (回测):")
@@ -750,9 +856,9 @@ def cmd_show(args: argparse.Namespace) -> None:
             print(f"  {strategy_name}: 夏普比率={s['sharpe_ratio']:.2f} 平均命中={s['avg_hit']:.2f} ≥2码率={s['hit2_rate']*100:.1f}% 特别号率={s['special_rate']*100:.1f}%")
 
     # ---------- 简洁投注推荐 ----------
-    print("\n" + "=" * 55)
-    print("🎯 本期投注推荐单 (基于集成投票策略)")
-    print("=" * 55)
+    print("\n" + "=" * 60)
+    print("🎯 本期投注推荐单 (基于集成投票策略 & 动态权重)")
+    print("=" * 60)
 
     draws = get_recent_draws(conn, 100)
     specials = get_recent_specials(conn, 100)
@@ -767,12 +873,13 @@ def cmd_show(args: argparse.Namespace) -> None:
         picked_special = ensemble_pred["special_number"]
     else:
         pair_lift = calculate_pair_lift(draws)
-        score = ensemble_vote(draws, specials, pair_lift)
+        score = ensemble_vote(draws, specials, pair_lift, use_dynamic_weights=True)
         picked_6 = score.main_picks
         picked_special = score.special_pick
 
     hot5 = picked_6[:5]
 
+    # 生肖热度 (近5期)
     zodiac_score = Counter()
     for draw in draws[-5:]:
         for n in draw:
@@ -795,20 +902,67 @@ def cmd_show(args: argparse.Namespace) -> None:
     rate1 = zodiac_hit_rate(top1)
     rate2 = zodiac_hit_rate(top2)
 
-    single_probs = {}
-    for n in hot5:
-        hits = sum(1 for draw in draws[-6:] if n in draw)
-        single_probs[n] = hits / 6 * 100
-
+    # 输出基本信息
     print(f"📅 参考期号: {pending[0]['issue_no'] if pending else next_issue_number(latest['issue_no'])}")
-    print("-" * 55)
+    print("-" * 60)
     print(f"🐉 最强生肖: {top1}  (近5期命中率 {rate1:.0f}%)")
     print(f"🐉 次强生肖: {top2}  (近5期命中率 {rate2:.0f}%)")
-    print("🎲 正码5个:")
+    print("🎲 正码5个 (科学概率评估):")
+
     for n in hot5:
-        print(f"      {n:02d} ({get_zodiac(n)})  ─ 近6期命中率 {single_probs[n]:.0f}%")
-    print(f"🔮 特别号: {picked_special:02d} ({special_zod})")
-    print("=" * 55)
+        hits_30 = sum(1 for draw in draws[-30:] if n in draw)
+        low, high = wilson_interval(hits_30, 30)
+        posterior = bayesian_posterior(hits_30, 30)
+        print(f"      {n:02d} ({get_zodiac(n)})  ─ 威尔逊区间 [{low:.0f}%-{high:.0f}%]  后验概率 {posterior:.1f}%")
+
+    print(f"🔮 特别号 (首选): {picked_special:02d} ({special_zod})")
+
+    # ---------- 特别号6码推荐 ----------
+    pair_lift = calculate_pair_lift(draws)
+    scores_list = []
+    for s in ["hot", "cold", "momentum", "balanced", "pattern"]:
+        score_obj = generate_strategy_score(draws, specials, s, pair_lift, use_dynamic_weights=True)
+        scores_list.append(score_obj.raw_scores)
+
+    special_scores = {n: 0.0 for n in ALL_NUMBERS}
+    votes = {n: 0.0 for n in ALL_NUMBERS}
+    for sc in scores_list:
+        ranked = sorted(sc.items(), key=lambda x: x[1], reverse=True)
+        for rank, (n, _) in enumerate(ranked):
+            votes[n] += 49 - rank
+    max_vote = max(votes.values())
+    norm_votes = {n: v / max_vote for n, v in votes.items()}
+
+    markov = SpecialMarkovModel(2)
+    markov.train(specials)
+    special_exp = {n: 0.0 for n in ALL_NUMBERS}
+    for i, sp in enumerate(specials[-30:]):
+        weight = math.exp(-i / 6)
+        special_exp[sp] += weight * 2.0
+
+    recent_specials = specials[-5:]
+    state = tuple(recent_specials[-2:]) if len(recent_specials) >= 2 else None
+    markov_probs = {n: 0.0 for n in ALL_NUMBERS}
+    if state and state in markov.transitions:
+        total = sum(markov.transitions[state].values())
+        for n, cnt in markov.transitions[state].items():
+            markov_probs[n] = cnt / total
+
+    for n in ALL_NUMBERS:
+        special_scores[n] = (norm_votes[n] * 0.3 +
+                             (special_exp[n] / max(special_exp.values()) if max(special_exp.values()) > 0 else 0) * 0.4 +
+                             markov_probs[n] * 0.3)
+
+    for n in hot5:
+        special_scores[n] = -1.0
+
+    top6_specials = sorted(special_scores.items(), key=lambda x: x[1], reverse=True)[:6]
+
+    print("\n🔯 特别号6码推荐 (按综合评分排序):")
+    for i, (num, score) in enumerate(top6_specials, 1):
+        print(f"   {i}. {num:02d} ({get_zodiac(num)})  ─ 综合评分: {score*100:.1f}%")
+
+    print("=" * 60)
     print("⚠️ 数据仅供参考，理性投注。")
 
     conn.close()
@@ -824,7 +978,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="香港六合彩专业终极版")
+    parser = argparse.ArgumentParser(description="香港六合彩终极科学版")
     parser.add_argument("--db", default=DB_PATH_DEFAULT, help="数据库路径")
     sub = parser.add_subparsers(dest="command", required=True)
 
