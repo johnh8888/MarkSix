@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-香港六合彩 - 专业级全面升级版
+香港六合彩 - 专业级全面升级版 (全中文输出)
 功能：
 - 多数据源交叉验证与自动补全
 - 指数衰减动量 + 关联规则挖掘 (Lift)
@@ -11,7 +11,7 @@
 - 配置文件支持 (YAML) + 日志系统
 
 用法:
-    python marksix_pro.py sync [--source auto] [--third-party-url ...]
+    python marksix_pro.py sync [--third-party-url ...]
     python marksix_pro.py predict
     python marksix_pro.py show
     python marksix_pro.py backtest
@@ -26,13 +26,12 @@ import math
 import random
 import re
 import sqlite3
-import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from itertools import combinations
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 from urllib.request import Request, urlopen
 
 # -------------------- 配置文件处理 --------------------
@@ -74,7 +73,7 @@ THIRD_PARTY_URLS_DEFAULT = CONFIG.get(
 )
 THIRD_PARTY_MAX_PAGES_DEFAULT = CONFIG.get("third_party_max_pages", 60)
 
-# 策略配置
+# 策略配置 (名称已全部中文化)
 STRATEGY_CONFIGS = {
     "hot": {"name": "热号策略", "w_freq": 0.7, "w_omit": 0.0, "w_mom": 0.3, "w_pair": 0.0},
     "cold": {"name": "冷号回补", "w_freq": 0.0, "w_omit": 0.7, "w_mom": 0.3, "w_pair": 0.0},
@@ -335,7 +334,7 @@ def fetch_from_url(url: str, timeout: int = 20) -> Optional[str]:
         with urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8-sig")
     except Exception as e:
-        logger.warning(f"Failed to fetch {url}: {e}")
+        logger.warning(f"获取数据失败 {url}: {e}")
         return None
 
 
@@ -522,7 +521,7 @@ def fetch_all_sources(
             final_records.append(variants[0])
 
     logger.info(
-        f"Cross-validation: total {len(final_records)} records from {len(all_records)} issues"
+        f"交叉验证完成：从 {len(all_records)} 期数据中筛选出 {len(final_records)} 条有效记录"
     )
     return final_records
 
@@ -776,7 +775,7 @@ def run_rolling_backtest(
         "SELECT numbers_json, special_number FROM draws ORDER BY draw_date, issue_no"
     ).fetchall()
     if len(rows) < window + 10:
-        logger.warning("Not enough data for rolling backtest")
+        logger.warning("历史数据不足，无法进行滚动回测")
         return
     all_draws = [json.loads(r[0]) for r in rows]
     all_specials = [r[1] for r in rows]
@@ -882,16 +881,17 @@ def cmd_sync(args: argparse.Namespace) -> None:
     conn = connect_db(args.db)
     init_db(conn)
     third_party_urls = parse_url_list(args.third_party_url) if args.third_party_url else THIRD_PARTY_URLS_DEFAULT
+    print("正在从多个数据源同步历史开奖数据...")
     records = fetch_all_sources(
         official_url=args.official_url,
         third_party_urls=third_party_urls,
         third_party_max_pages=args.third_party_max_pages,
     )
     if not records:
-        logger.error("No valid records from any source")
+        print("错误：没有从任何数据源获取到有效记录。")
         return
     ins, upd = sync_draws(conn, records, source="cross_validated")
-    logger.info(f"Sync done: inserted={ins}, updated={upd}")
+    print(f"同步完成：新增 {ins} 期，更新 {upd} 期。")
 
     # 更新关联对表
     draws = get_recent_draws(conn, 300)
@@ -906,7 +906,8 @@ def cmd_sync(args: argparse.Namespace) -> None:
 
     # 复盘最新一期
     reviewed = review_latest(conn)
-    logger.info(f"Reviewed {reviewed} predictions")
+    if reviewed > 0:
+        print(f"已自动复盘 {reviewed} 个预测策略。")
 
     # 增量回测
     run_rolling_backtest(conn)
@@ -919,7 +920,7 @@ def cmd_predict(args: argparse.Namespace) -> None:
     draws = get_recent_draws(conn, 200)
     specials = get_recent_specials(conn, 200)
     if len(draws) < 20:
-        logger.error("Insufficient data, need at least 20 draws")
+        print("错误：历史数据不足（至少需要20期），请先运行 sync 同步数据。")
         return
     pair_lift = calculate_pair_lift(draws)
     latest = conn.execute(
@@ -943,13 +944,15 @@ def cmd_predict(args: argparse.Namespace) -> None:
             ),
         )
     conn.commit()
-    print(f"Predictions generated for {next_issue}")
+    print(f"已生成 {next_issue} 期的预测推荐。")
     conn.close()
 
 
 def cmd_show(args: argparse.Namespace) -> None:
     conn = connect_db(args.db)
     init_db(conn)
+
+    # ---------- 原有统计输出 ----------
     latest = conn.execute(
         "SELECT issue_no, draw_date, numbers_json, special_number FROM draws ORDER BY draw_date DESC LIMIT 1"
     ).fetchone()
@@ -961,49 +964,122 @@ def cmd_show(args: argparse.Namespace) -> None:
     else:
         print("暂无开奖数据。")
 
-    # 显示待开奖预测
     pending = conn.execute(
         "SELECT issue_no, strategy, numbers_json, special_number, confidence FROM predictions WHERE status='PENDING' ORDER BY strategy"
     ).fetchall()
     if pending:
-        print("\n本期推荐:")
+        print("\n本期多策略推荐 (6码池):")
         for p in pending:
             nums = json.loads(p["numbers_json"])
             conf_str = f" (置信度: {p['confidence']*100:.1f}%)" if p["confidence"] else ""
+            strategy_name = STRATEGY_CONFIGS.get(p['strategy'], {}).get('name', p['strategy'])
             print(
-                f"  [{p['issue_no']}] {p['strategy']}{conf_str}: {' '.join(f'{n:02d}' for n in nums)} | 特别号: {p['special_number']:02d}"
+                f"  [{p['issue_no']}] {strategy_name}{conf_str}: {' '.join(f'{n:02d}' for n in nums)} | 特别号: {p['special_number']:02d}"
             )
     else:
         print("\n暂无待开奖预测，请先运行 predict")
 
-    # 显示回测统计
     stats = conn.execute(
         "SELECT * FROM backtest_stats ORDER BY sharpe_ratio DESC"
     ).fetchall()
     if stats:
         print("\n策略历史表现 (回测):")
         for s in stats:
+            strategy_name = STRATEGY_CONFIGS.get(s['strategy'], {}).get('name', s['strategy'])
             print(
-                f"  {s['strategy']}: 夏普={s['sharpe_ratio']:.2f} 平均命中={s['avg_hit']:.2f} ≥2码率={s['hit2_rate']*100:.1f}% 特别号率={s['special_rate']*100:.1f}%"
+                f"  {strategy_name}: 夏普比率={s['sharpe_ratio']:.2f} 平均命中={s['avg_hit']:.2f} ≥2码率={s['hit2_rate']*100:.1f}% 特别号率={s['special_rate']*100:.1f}%"
             )
+
+    # ---------- 新增：简洁投注推荐（生肖+5码+特别号） ----------
+    print("\n" + "=" * 55)
+    print("🎯 本期投注推荐单 (基于集成投票策略)")
+    print("=" * 55)
+
+    # 获取最近数据用于分析
+    draws = get_recent_draws(conn, limit=100)
+    specials = get_recent_specials(conn, limit=100)
+    if len(draws) < 20:
+        print("历史数据不足，无法生成投注推荐。")
+        conn.close()
+        return
+
+    # 获取集成投票策略的推荐（若尚未生成则现场生成）
+    ensemble_pred = conn.execute(
+        "SELECT numbers_json, special_number, confidence FROM predictions WHERE status='PENDING' AND strategy='ensemble'"
+    ).fetchone()
+    if ensemble_pred:
+        picked_6 = json.loads(ensemble_pred["numbers_json"])
+        picked_special = ensemble_pred["special_number"]
+    else:
+        # 若没有待预测记录，临时生成
+        pair_lift = calculate_pair_lift(draws)
+        score = ensemble_vote(draws, specials, pair_lift)
+        picked_6 = score.main_picks
+        picked_special = score.special_pick
+
+    hot5 = picked_6[:5]  # 取前5个正码
+
+    # 生肖热度 (近5期正码)
+    zodiac_score = Counter()
+    for draw in draws[-5:]:
+        for n in draw:
+            for z, nums in ZODIAC_MAP.items():
+                if n in nums:
+                    zodiac_score[z] += 1
+    top_zod = zodiac_score.most_common(2)
+    top1 = top_zod[0][0] if top_zod else "龙"
+    top2 = top_zod[1][0] if len(top_zod) > 1 else "马"
+
+    # 特别号生肖
+    special_zod = get_zodiac(picked_special)
+
+    # 生肖近5期命中率
+    def zodiac_hit_rate(zod, draws, limit=5):
+        hits = 0
+        for draw in draws[-limit:]:
+            if any(n in ZODIAC_MAP[zod] for n in draw):
+                hits += 1
+        return hits / limit * 100
+
+    rate1 = zodiac_hit_rate(top1, draws)
+    rate2 = zodiac_hit_rate(top2, draws)
+
+    # 正码近6期命中率
+    single_probs = {}
+    for n in hot5:
+        hits = sum(1 for draw in draws[-6:] if n in draw)
+        single_probs[n] = hits / 6 * 100
+
+    # 输出投注单
+    print(f"📅 参考期号: {pending[0]['issue_no'] if pending else next_issue_number(latest['issue_no'])}")
+    print("-" * 55)
+    print(f"🐉 最强生肖: {top1}  (近5期命中率 {rate1:.0f}%)")
+    print(f"🐉 次强生肖: {top2}  (近5期命中率 {rate2:.0f}%)")
+    print("🎲 正码5个:")
+    for n in hot5:
+        print(f"      {n:02d} ({get_zodiac(n)})  ─ 近6期命中率 {single_probs[n]:.0f}%")
+    print(f"🔮 特别号: {picked_special:02d} ({special_zod})")
+    print("=" * 55)
+    print("⚠️ 数据仅供参考，理性投注。")
+
     conn.close()
 
 
 def cmd_backtest(args: argparse.Namespace) -> None:
     conn = connect_db(args.db)
     init_db(conn)
+    print("正在运行滚动窗口回测，请稍候...")
     run_rolling_backtest(conn)
-    print("Rolling backtest completed.")
+    print("滚动回测完成，统计结果已更新至数据库。")
     conn.close()
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="香港六合彩专业升级版")
+    parser = argparse.ArgumentParser(description="香港六合彩专业升级版 (全中文输出)")
     parser.add_argument("--db", default=DB_PATH_DEFAULT, help="SQLite数据库路径")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_sync = sub.add_parser("sync", help="同步历史数据")
-    p_sync.add_argument("--source", choices=["auto"], default="auto")
     p_sync.add_argument("--official-url", default=OFFICIAL_URL)
     p_sync.add_argument(
         "--third-party-url", action="append", help="第三方数据源URL (可多次指定)"
