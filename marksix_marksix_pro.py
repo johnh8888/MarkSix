@@ -11,7 +11,7 @@
 - 配置文件支持 (YAML) + 日志系统
 
 用法:
-    python marksix_pro.py sync [--source auto] [--third-party-url ...]
+    python marksix_pro.py sync [--third-party-url ...]
     python marksix_pro.py predict
     python marksix_pro.py show
     python marksix_pro.py backtest
@@ -26,13 +26,12 @@ import math
 import random
 import re
 import sqlite3
-import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from itertools import combinations
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 from urllib.request import Request, urlopen
 
 # -------------------- 配置文件处理 --------------------
@@ -797,7 +796,6 @@ def run_rolling_backtest(
             special_hit = 1 if score.special_pick == test_special else 0
             results[strat].append((hits, special_hit, score.confidence))
 
-    # 计算统计量并更新数据库
     for strat, records in results.items():
         hits = [r[0] for r in records]
         avg_hit = sum(hits) / len(hits)
@@ -893,7 +891,6 @@ def cmd_sync(args: argparse.Namespace) -> None:
     ins, upd = sync_draws(conn, records, source="cross_validated")
     logger.info(f"Sync done: inserted={ins}, updated={upd}")
 
-    # 更新关联对表
     draws = get_recent_draws(conn, 300)
     pair_lift = calculate_pair_lift(draws)
     conn.execute("DELETE FROM pair_affinity")
@@ -904,11 +901,9 @@ def cmd_sync(args: argparse.Namespace) -> None:
         )
     conn.commit()
 
-    # 复盘最新一期
     reviewed = review_latest(conn)
     logger.info(f"Reviewed {reviewed} predictions")
 
-    # 增量回测
     run_rolling_backtest(conn)
     conn.close()
 
@@ -961,7 +956,6 @@ def cmd_show(args: argparse.Namespace) -> None:
     else:
         print("暂无开奖数据。")
 
-    # 显示待开奖预测
     pending = conn.execute(
         "SELECT issue_no, strategy, numbers_json, special_number, confidence FROM predictions WHERE status='PENDING' ORDER BY strategy"
     ).fetchall()
@@ -976,7 +970,6 @@ def cmd_show(args: argparse.Namespace) -> None:
     else:
         print("\n暂无待开奖预测，请先运行 predict")
 
-    # 显示回测统计
     stats = conn.execute(
         "SELECT * FROM backtest_stats ORDER BY sharpe_ratio DESC"
     ).fetchall()
@@ -1003,7 +996,6 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_sync = sub.add_parser("sync", help="同步历史数据")
-    p_sync.add_argument("--source", choices=["auto"], default="auto")
     p_sync.add_argument("--official-url", default=OFFICIAL_URL)
     p_sync.add_argument(
         "--third-party-url", action="append", help="第三方数据源URL (可多次指定)"
