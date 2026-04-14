@@ -1,0 +1,33 @@
+name: 香港六合彩预测
+
+on:
+  schedule:
+    - cron: '0 15 * * *'   # 北京时间 23:00
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: 安装依赖
+        run: pip install pyyaml
+      
+      - name: 同步数据
+        run: |
+          python marksix_pro.py sync \
+            --third-party-url https://lottolyzer.com/history/hong-kong/mark-six/page/1/per-page/50/summary-view \
+            --third-party-url https://marksix6.net/index.php?api=1 \
+            --third-party-max-pages 10
+      
+      - name: 生成预测
+        run: python marksix_pro.py predict
+      
+      - name: 显示推荐
+        run: python marksix_pro.py show
