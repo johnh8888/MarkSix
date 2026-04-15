@@ -1,8 +1,9 @@
-name: 香港六合彩预测
+name: 香港六合彩预测（申时·金水微调）
 
 on:
   schedule:
-    - cron: '0 15 * * *'   # 北京时间 23:00
+    # 北京时间 15:00（申时）执行，对应 UTC 7:00
+    - cron: '0 7 * * *'
   workflow_dispatch:
 
 jobs:
@@ -17,21 +18,20 @@ jobs:
           python-version: '3.10'
       
       - name: 安装依赖
-        run: |
-          pip install pyyaml
-          pip install requests
+        run: pip install requests pyyaml
       
       - name: 同步数据
         run: |
-          python marksix_pro.py sync \
+          python marksix_ultimate.py sync \
             --third-party-url https://lottolyzer.com/history/hong-kong/mark-six/page/1/per-page/50/summary-view \
             --third-party-url https://marksix6.net/index.php?api=1 \
             --third-party-max-pages 10
       
       - name: 生成预测
-        run: python marksix_pro.py predict
+        run: python marksix_ultimate.py predict
       
       - name: 显示推荐并推送
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-        run: python marksix_pro.py show
+          FENGSHUI_POWER: 0.2   # 玄学影响力，可调整（0=纯统计，1=纯玄学）
+        run: python marksix_ultimate.py show
