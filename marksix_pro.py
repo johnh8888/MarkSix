@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-香港六合彩 - 温和玄学版（统计主导 + 金水微调 + 动态权重）
+香港六合彩 
 用法:
-    python marksix_ultimate.py sync
-    python marksix_ultimate.py predict
-    python marksix_ultimate.py show
-    python marksix_ultimate.py backtest
+    python marksix_pro.py sync
+    python marksix_pro.py predict
+    python marksix_pro.py show
+    python marksix_pro.py backtest
 """
 
 import argparse
