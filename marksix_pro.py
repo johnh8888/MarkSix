@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-香港六合彩 
+香港六合彩 - 
 用法:
     python marksix_pro.py sync
     python marksix_pro.py predict
@@ -11,6 +11,7 @@
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -772,7 +773,7 @@ class SpecialMarkovModel:
         return max(set(recent), key=recent.count)
 
 
-# -------------------- 策略核心（温和玄学融合）--------------------
+# -------------------- 策略核心（温和玄学融合 + 特别号多样化）--------------------
 def generate_strategy_score(
     draws: List[List[int]],
     specials: List[int],
@@ -846,9 +847,23 @@ def generate_strategy_score(
 
     markov = SpecialMarkovModel(2)
     markov.train(specials)
-    special_pick = markov.predict(specials[-5:])
+    special_pick = markov.predict(specials[-5:] if len(specials) >= 5 else specials)
+
+    # ---------- 特别号多样化（核心新增）----------
+    seed = int(hashlib.md5(strategy.encode()).hexdigest()[:8], 16) % 10000
+    random.seed(seed)
+    sorted_scores = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
+    candidates = [n for n, _ in sorted_scores if n not in main_picks][:10]
+    if candidates:
+        if random.random() < 0.8 or len(candidates) == 1:
+            special_pick = candidates[0]
+        else:
+            special_pick = random.choice(candidates[1:min(4, len(candidates))])
+    else:
+        special_pick = max(final_scores, key=lambda n: final_scores[n] if n not in main_picks else -1)
     while special_pick in main_picks:
         special_pick = (special_pick % 49) + 1
+    random.seed(42)  # 恢复固定种子
 
     confidence = sum(final_scores[n] for n in main_picks) / 6 if main_picks else 0
     return StrategyScore(main_picks, special_pick, confidence, final_scores)
@@ -871,7 +886,7 @@ def ensemble_vote(
     main_picks = monte_carlo_pick(norm_votes, pair_lift)
     special = SpecialMarkovModel(2)
     special.train(specials)
-    sp = special.predict(specials[-5:])
+    sp = special.predict(specials[-5:] if len(specials) >= 5 else specials)
     while sp in main_picks:
         sp = (sp % 49) + 1
     confidence = sum(norm_votes[n] for n in main_picks) / 6 if main_picks else 0
