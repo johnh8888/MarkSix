@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-香港六合彩 - 
+香港六合彩 - 温和玄学版 (最近6期预测)
 用法:
     python marksix_pro.py sync
     python marksix_pro.py predict
@@ -164,6 +164,9 @@ SUM_TARGET = CONFIG.get("sum_target", (115, 185))
 # 玄学影响力（可通过环境变量 FENGSHUI_POWER 调节，范围 0~1，默认 0.2）
 FENGSHUI_POWER = float(os.environ.get("FENGSHUI_POWER", "0.2"))
 STAT_POWER = 1.0 - FENGSHUI_POWER
+
+# ---------- 新增：预测窗口设置为最近6期 ----------
+PREDICT_WINDOW = 6   # 使用最近6期开奖数据预测
 
 
 # -------------------- 数据结构 --------------------
@@ -554,12 +557,14 @@ def sync_draws(conn: sqlite3.Connection, records: List[DrawRecord], source: str 
 
 
 # -------------------- 特征工程 --------------------
-def get_recent_draws(conn: sqlite3.Connection, limit: int = 100) -> List[List[int]]:
+def get_recent_draws(conn: sqlite3.Connection, limit: int = PREDICT_WINDOW) -> List[List[int]]:
+    """获取最近 limit 期主号列表，默认使用 PREDICT_WINDOW"""
     rows = conn.execute("SELECT numbers_json FROM draws ORDER BY draw_date DESC, issue_no DESC LIMIT ?", (limit,)).fetchall()
     return [json.loads(r[0]) for r in rows]
 
 
-def get_recent_specials(conn: sqlite3.Connection, limit: int = 100) -> List[int]:
+def get_recent_specials(conn: sqlite3.Connection, limit: int = PREDICT_WINDOW) -> List[int]:
+    """获取最近 limit 期特别号列表，默认使用 PREDICT_WINDOW"""
     rows = conn.execute("SELECT special_number FROM draws ORDER BY draw_date DESC, issue_no DESC LIMIT ?", (limit,)).fetchall()
     return [r[0] for r in rows]
 
@@ -849,7 +854,7 @@ def generate_strategy_score(
     markov.train(specials)
     special_pick = markov.predict(specials[-5:] if len(specials) >= 5 else specials)
 
-    # ---------- 特别号多样化（核心新增）----------
+    # 特别号多样化
     seed = int(hashlib.md5(strategy.encode()).hexdigest()[:8], 16) % 10000
     random.seed(seed)
     sorted_scores = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
@@ -1039,10 +1044,11 @@ def cmd_sync(args: argparse.Namespace) -> None:
 def cmd_predict(args: argparse.Namespace) -> None:
     conn = connect_db(args.db)
     init_db(conn)
-    draws = get_recent_draws(conn, 200)
-    specials = get_recent_specials(conn, 200)
-    if len(draws) < 20:
-        print("错误：历史数据不足，请先运行 sync。")
+    # 修改：只取最近 PREDICT_WINDOW 期（默认6期）
+    draws = get_recent_draws(conn, PREDICT_WINDOW)
+    specials = get_recent_specials(conn, PREDICT_WINDOW)
+    if len(draws) < 6:
+        print("错误：历史数据不足（至少需要6期），请先运行 sync。")
         return
     pair_lift = calculate_pair_lift(draws)
     latest = conn.execute("SELECT issue_no FROM draws ORDER BY draw_date DESC LIMIT 1").fetchone()
@@ -1158,9 +1164,10 @@ def cmd_show(args: argparse.Namespace) -> None:
     print(f"🎯 本期投注推荐单 (统计 {STAT_POWER*100:.0f}% + 玄学 {FENGSHUI_POWER*100:.0f}% · {day_gan}{day_zhi}日 五行{day_wuxing})")
     print("=" * 60)
 
-    draws = get_recent_draws(conn, 100)
-    specials = get_recent_specials(conn, 100)
-    if len(draws) < 20:
+    # 修改：只取最近 PREDICT_WINDOW 期（6期）
+    draws = get_recent_draws(conn, PREDICT_WINDOW)
+    specials = get_recent_specials(conn, PREDICT_WINDOW)
+    if len(draws) < 6:
         print("历史数据不足，无法生成投注推荐。")
         conn.close()
         return
@@ -1223,12 +1230,11 @@ def cmd_show(args: argparse.Namespace) -> None:
     print("-" * 60)
     print(f"🐉 最强生肖: {top1}  (近5期命中率 {rate1:.0f}%)")
     print(f"🐉 次强生肖: {top2}  (近5期命中率 {rate2:.0f}%)")
-    print("🎲 正码5个 (科学概率评估):")
-
+    print("🎲 正码5个 (科学概率评估，基于最近6期):")
     for n in hot5:
-        hits_30 = sum(1 for draw in draws[-30:] if n in draw)
-        low, high = wilson_interval(hits_30, 30)
-        posterior = bayesian_posterior(hits_30, 30)
+        hits_6 = sum(1 for draw in draws if n in draw)
+        low, high = wilson_interval(hits_6, len(draws))
+        posterior = bayesian_posterior(hits_6, len(draws))
         print(f"      {n:02d} ({get_zodiac(n)})  ─ 威尔逊区间 [{low:.0f}%-{high:.0f}%]  后验概率 {posterior:.1f}%")
 
     print(f"🔮 特别号 (首选): {picked_special:02d} ({special_zod})")
@@ -1401,7 +1407,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="香港六合彩 - 温和玄学版")
+    parser = argparse.ArgumentParser(description="香港六合彩 - 温和玄学版 (最近6期预测)")
     parser.add_argument("--db", default=DB_PATH_DEFAULT, help="数据库路径")
     sub = parser.add_subparsers(dest="command", required=True)
 
