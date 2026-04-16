@@ -1226,46 +1226,31 @@ def cmd_show(args: argparse.Namespace) -> None:
 
     hot5 = picked_6[:5]
 
-    # 综合投票选出最终生肖
-    vote_zodiac = Counter()
-    for p in pending:
-        nums = json.loads(p["numbers_json"])
-        strat_zodiac = Counter()
-        for n in nums:
-            for z, z_nums in ZODIAC_MAP.items():
-                if n in z_nums:
-                    strat_zodiac[z] += 1
-                    break
-        top = strat_zodiac.most_common(2)
-        if top:
-            vote_zodiac[top[0][0]] += 3
-        if len(top) > 1:
-            vote_zodiac[top[1][0]] += 1
+   # ---------- 直接基于最近2期开奖主号统计生肖出现次数 ----------
+recent_zodiac = Counter()
+for draw in draws[-2:]:          # 只取最近2期
+    for n in draw:
+        for z, nums in ZODIAC_MAP.items():
+            if n in nums:
+                recent_zodiac[z] += 1
+                break
+if recent_zodiac:
+    sorted_zodiac = sorted(recent_zodiac.items(), key=lambda x: x[1], reverse=True)
+    top1 = sorted_zodiac[0][0]
+    top2 = sorted_zodiac[1][0] if len(sorted_zodiac) > 1 else "龙"
+else:
+    top1, top2 = "龙", "马"
 
-    recent_zodiac = Counter()
-    for draw in draws[-5:]:
-        for n in draw:
-            for z, nums in ZODIAC_MAP.items():
-                if n in nums:
-                    recent_zodiac[z] += 1
-    for z, cnt in recent_zodiac.items():
-        vote_zodiac[z] += cnt * 2
+# 计算命中率（基于最近2期）
+def zodiac_hit_rate(zod, limit=2):
+    hits = 0
+    for draw in draws[-limit:]:
+        if any(n in ZODIAC_MAP[zod] for n in draw):
+            hits += 1
+    return hits / limit * 100 if limit > 0 else 0
 
-    top_zod = vote_zodiac.most_common(2)
-    top1 = top_zod[0][0] if top_zod else "龙"
-    top2 = top_zod[1][0] if len(top_zod) > 1 else "马"
-
-    special_zod = get_zodiac(picked_special)
-
-    def zodiac_hit_rate(zod, limit=5):
-        hits = 0
-        for draw in draws[-limit:]:
-            if any(n in ZODIAC_MAP[zod] for n in draw):
-                hits += 1
-        return hits / limit * 100
-
-    rate1 = zodiac_hit_rate(top1)
-    rate2 = zodiac_hit_rate(top2)
+rate1 = zodiac_hit_rate(top1, 2)
+rate2 = zodiac_hit_rate(top2, 2)
 
     next_issue_str = pending[0]['issue_no'] if pending else (next_issue_number(latest['issue_no']) if latest else "未知")
     print(f"📅 参考期号: {next_issue_str}")
