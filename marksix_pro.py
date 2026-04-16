@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-香港六合彩 - 温和玄学版 (最近6期预测)
+香港六合彩 - 温和玄学版（基于最近6期预测，赔率已适配）
 用法:
     python marksix_pro.py sync
     python marksix_pro.py predict
@@ -165,8 +165,15 @@ SUM_TARGET = CONFIG.get("sum_target", (115, 185))
 FENGSHUI_POWER = float(os.environ.get("FENGSHUI_POWER", "0.2"))
 STAT_POWER = 1.0 - FENGSHUI_POWER
 
-# ---------- 新增：预测窗口设置为最近6期 ----------
-PREDICT_WINDOW = 6   # 使用最近6期开奖数据预测
+# ========== 修改点1：预测窗口改为最近6期 ==========
+PREDICT_WINDOW = 6
+
+# ========== 修改点2：赔率配置 ==========
+# 一肖赔率：马 1:0.7，其他 1:1.05
+ZODIAC_ODDS = {z: 1.05 for z in ZODIAC_MAP.keys()}
+ZODIAC_ODDS["马"] = 0.7
+SPECIAL_ODDS = 47          # 特码赔率 1:47
+TRIO_ODDS = 700            # 三中三赔率 1:700
 
 
 # -------------------- 数据结构 --------------------
@@ -558,13 +565,11 @@ def sync_draws(conn: sqlite3.Connection, records: List[DrawRecord], source: str 
 
 # -------------------- 特征工程 --------------------
 def get_recent_draws(conn: sqlite3.Connection, limit: int = PREDICT_WINDOW) -> List[List[int]]:
-    """获取最近 limit 期主号列表，默认使用 PREDICT_WINDOW"""
     rows = conn.execute("SELECT numbers_json FROM draws ORDER BY draw_date DESC, issue_no DESC LIMIT ?", (limit,)).fetchall()
     return [json.loads(r[0]) for r in rows]
 
 
 def get_recent_specials(conn: sqlite3.Connection, limit: int = PREDICT_WINDOW) -> List[int]:
-    """获取最近 limit 期特别号列表，默认使用 PREDICT_WINDOW"""
     rows = conn.execute("SELECT special_number FROM draws ORDER BY draw_date DESC, issue_no DESC LIMIT ?", (limit,)).fetchall()
     return [r[0] for r in rows]
 
@@ -854,7 +859,7 @@ def generate_strategy_score(
     markov.train(specials)
     special_pick = markov.predict(specials[-5:] if len(specials) >= 5 else specials)
 
-    # 特别号多样化
+    # ---------- 特别号多样化（核心新增）----------
     seed = int(hashlib.md5(strategy.encode()).hexdigest()[:8], 16) % 10000
     random.seed(seed)
     sorted_scores = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
@@ -977,46 +982,84 @@ def bayesian_posterior(hits: int, total: int) -> float:
     return (hits + 1) / (total + 49) * 100
 
 
-# -------------------- 智能投注方案 --------------------
-def print_betting_plan(hot5, top1_zod, special_first, top_specials, best_combo, budget=200):
+# -------------------- 智能投注方案（根据赔率优化，预算500元）--------------------
+def print_betting_plan(hot5, top1_zod, special_first, top_specials, best_combo, budget=500):
+    """
+    根据生肖赔率动态调整投注方案
+    - 马赔率 1:0.7，其他生肖 1:1.05
+    - 特码赔率 1:47
+    - 三中三赔率 1:700
+    - 预算 500 元，生肖保本优先，剩余资金按 7:3 分配给特码和三中三
+    """
+    odds_zodiac = ZODIAC_ODDS.get(top1_zod, 1.05)
+    odds_special = SPECIAL_ODDS
+    odds_trio = TRIO_ODDS
+
+    # 计算实现“保本”所需的生肖投注额（即生肖中奖后至少收回总本金）
+    min_S = budget / odds_zodiac if odds_zodiac > 0 else budget
+    S = int(min_S) + (1 if min_S > int(min_S) else 0)
+    remaining = budget - S
+    if remaining < 0:
+        S = budget
+        T = 0
+        P = 0
+    else:
+        # 剩余资金分配：特码占70%，三中三占30%
+        T = int(remaining * 0.7)
+        P = remaining - T
+
+    # 若生肖赔率为1:1.05且 S == budget，则无法购买其他项，提供备选方案
+    if odds_zodiac == 1.05 and S == budget:
+        print("\n⚠️ 当前生肖赔率为1:1.05，实现严格保本需将全部预算投入生肖，无法购买特码和三中三。")
+        print("   建议降低总预算或接受生肖中时微亏的方案。")
+        # 备选方案：生肖投 480 元，特码 15 元，三中三 5 元
+        S = 480
+        T = 15
+        P = 5
+        print(f"   备选方案：生肖 {S} 元（中奖得 {S * odds_zodiac:.2f}，净亏 {budget - S * odds_zodiac:.2f}），特码 {T} 元，三中三 {P} 元。")
+    elif odds_zodiac == 0.7:
+        # 马赔率低，无法保本，只能部分投入
+        S = min(480, budget - 20)  # 留出20元买特码和三中三
+        T = 15
+        P = 5
+        print(f"\n⚠️ 生肖【马】赔率仅 1:0.7，无法实现保本。建议减少生肖投注，增加特码和三中三。")
+        print(f"   调整后方案：生肖 {S} 元（中奖得 {S * odds_zodiac:.2f}，亏 {budget - S * odds_zodiac:.2f}），特码 {T} 元，三中三 {P} 元。")
+
     print("\n" + "=" * 60)
-    print("💰 智能投注方案 (特码/正码/一肖/三中三)")
+    print("💰 智能投注方案 (根据实际赔率优化)")
     print("=" * 60)
-    print(f"📊 推荐预算: {budget}元\n")
-    special_high = top_specials[0][0] if top_specials else special_first
-    main_focus = best_combo if best_combo and len(best_combo) == 3 else hot5[:3]
-
-    print("【稳健型方案】")
-    print(f"  一肖 {top1_zod}: {int(budget * 0.3)}元")
-    print(f"  特码 {special_first:02d}({int(budget * 0.15)}元) + {special_high:02d}({int(budget * 0.1)}元)")
-    print(f"  正码 {' '.join(f'{n:02d}' for n in main_focus)} 各{int(budget * 0.1)}元")
+    print(f"📊 总预算: {budget}元")
+    print(f"🐉 生肖: {top1_zod} (赔率 1:{odds_zodiac})")
+    print(f"🎲 特码: {special_first:02d} (赔率 1:{odds_special})")
     if best_combo:
-        print(f"  三全中 {' '.join(f'{n:02d}' for n in best_combo)}: {int(budget * 0.15)}元")
-
-    print("\n【进取型方案】")
-    print(f"  一肖 {top1_zod}: {int(budget * 0.3)}元")
-    print(f"  特码 {special_high:02d}({int(budget * 0.2)}元) + {special_first:02d}({int(budget * 0.1)}元)")
-    print(f"  正码5个均注: {int(budget * 0.25)}元")
-    if best_combo:
-        print(f"  三全中 {' '.join(f'{n:02d}' for n in best_combo)}: {int(budget * 0.15)}元")
-
-    print("\n【极限精简型】")
-    print(f"  一肖 {top1_zod}: {int(budget * 0.4)}元")
-    print(f"  特码 {special_high:02d}: {int(budget * 0.4)}元")
-    print(f"  正码 {main_focus[0]:02d},{main_focus[1]:02d}: 各{int(budget * 0.1)}元")
+        print(f"🏆 三中三: {' '.join(f'{n:02d}' for n in best_combo)} (赔率 1:{odds_trio})")
+    print("-" * 60)
+    print(f"【推荐投注】")
+    print(f"  一肖 {top1_zod}: {S} 元  (中奖得 {S * odds_zodiac:.2f} 元)")
+    if T > 0:
+        print(f"  特码 {special_first:02d}: {T} 元  (中奖得 {T * odds_special} 元)")
+    if P > 0 and best_combo:
+        trio_str = ' '.join(f'{n:02d}' for n in best_combo) if best_combo else "无"
+        print(f"  三中三 {trio_str}: {P} 元  (中奖得 {P * odds_trio} 元)")
+    print("-" * 60)
+    # 计算各种中奖情况下的总回报
+    if T > 0 or P > 0:
+        print("【预期回报】")
+        only_zodiac = S * odds_zodiac
+        print(f"  仅生肖中: 总回报 {only_zodiac:.2f} 元, 净收益 {only_zodiac - budget:.2f} 元")
+        if T > 0:
+            zodiac_special = S * odds_zodiac + T * odds_special
+            print(f"  生肖+特码: {zodiac_special:.2f} 元, 净收益 {zodiac_special - budget:.2f} 元")
+        if P > 0 and best_combo:
+            zodiac_trio = S * odds_zodiac + P * odds_trio
+            print(f"  生肖+三中三: {zodiac_trio:.2f} 元, 净收益 {zodiac_trio - budget:.2f} 元")
+        if T > 0 and P > 0 and best_combo:
+            all_win = S * odds_zodiac + T * odds_special + P * odds_trio
+            print(f"  全部中奖: {all_win:.2f} 元, 净收益 {all_win - budget:.2f} 元")
     print("=" * 60)
 
 
 # -------------------- 命令行接口 --------------------
-def parse_url_list(values: Sequence[str]) -> List[str]:
-    out = []
-    for v in values:
-        for u in v.split(","):
-            if u := u.strip():
-                out.append(u)
-    return list(dict.fromkeys(out))
-
-
 def cmd_sync(args: argparse.Namespace) -> None:
     conn = connect_db(args.db)
     init_db(conn)
@@ -1044,7 +1087,7 @@ def cmd_sync(args: argparse.Namespace) -> None:
 def cmd_predict(args: argparse.Namespace) -> None:
     conn = connect_db(args.db)
     init_db(conn)
-    # 修改：只取最近 PREDICT_WINDOW 期（默认6期）
+    # 使用最近6期数据
     draws = get_recent_draws(conn, PREDICT_WINDOW)
     specials = get_recent_specials(conn, PREDICT_WINDOW)
     if len(draws) < 6:
@@ -1164,7 +1207,6 @@ def cmd_show(args: argparse.Namespace) -> None:
     print(f"🎯 本期投注推荐单 (统计 {STAT_POWER*100:.0f}% + 玄学 {FENGSHUI_POWER*100:.0f}% · {day_gan}{day_zhi}日 五行{day_wuxing})")
     print("=" * 60)
 
-    # 修改：只取最近 PREDICT_WINDOW 期（6期）
     draws = get_recent_draws(conn, PREDICT_WINDOW)
     specials = get_recent_specials(conn, PREDICT_WINDOW)
     if len(draws) < 6:
@@ -1231,6 +1273,7 @@ def cmd_show(args: argparse.Namespace) -> None:
     print(f"🐉 最强生肖: {top1}  (近5期命中率 {rate1:.0f}%)")
     print(f"🐉 次强生肖: {top2}  (近5期命中率 {rate2:.0f}%)")
     print("🎲 正码5个 (科学概率评估，基于最近6期):")
+
     for n in hot5:
         hits_6 = sum(1 for draw in draws if n in draw)
         low, high = wilson_interval(hits_6, len(draws))
@@ -1355,8 +1398,8 @@ def cmd_show(args: argparse.Namespace) -> None:
     print("=" * 60)
     print("⚠️ 数据仅供参考，理性投注。")
 
-    # ---------- 智能投注方案 ----------
-    print_betting_plan(hot5, top1, picked_special, top6_specials, best_combo, budget=200)
+    # ---------- 智能投注方案（预算500元）----------
+    print_betting_plan(hot5, top1, picked_special, top6_specials, best_combo, budget=500)
 
     # ---------- 微信推送（温和玄学版）----------
     push_lines = []
@@ -1406,8 +1449,17 @@ def cmd_backtest(args: argparse.Namespace) -> None:
     conn.close()
 
 
+def parse_url_list(values: Sequence[str]) -> List[str]:
+    out = []
+    for v in values:
+        for u in v.split(","):
+            if u := u.strip():
+                out.append(u)
+    return list(dict.fromkeys(out))
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="香港六合彩 - 温和玄学版 (最近6期预测)")
+    parser = argparse.ArgumentParser(description="香港六合彩 - 温和玄学版")
     parser.add_argument("--db", default=DB_PATH_DEFAULT, help="数据库路径")
     sub = parser.add_subparsers(dest="command", required=True)
 
