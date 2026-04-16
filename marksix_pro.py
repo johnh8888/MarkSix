@@ -1120,13 +1120,6 @@ def cmd_show(args: argparse.Namespace) -> None:
     today = date.today()
     day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
 
-  def cmd_show(args: argparse.Namespace) -> None:
-    conn = connect_db(args.db)
-    init_db(conn)
-
-    today = date.today()
-    day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
-
     # ---------- 最新开奖 ----------
     latest = conn.execute("SELECT issue_no, draw_date, numbers_json, special_number FROM draws ORDER BY draw_date DESC LIMIT 1").fetchone()
     if latest:
@@ -1429,6 +1422,7 @@ def cmd_show(args: argparse.Namespace) -> None:
     send_pushplus_notification("香港六合彩预测", push_content)
 
     conn.close()
+
 
 def cmd_backtest(args: argparse.Namespace) -> None:
     conn = connect_db(args.db)
