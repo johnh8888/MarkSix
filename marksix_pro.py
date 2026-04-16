@@ -1120,6 +1120,13 @@ def cmd_show(args: argparse.Namespace) -> None:
     today = date.today()
     day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
 
+  def cmd_show(args: argparse.Namespace) -> None:
+    conn = connect_db(args.db)
+    init_db(conn)
+
+    today = date.today()
+    day_gan, day_zhi, day_wuxing = get_day_ganzhi(today)
+
     # ---------- 最新开奖 ----------
     latest = conn.execute("SELECT issue_no, draw_date, numbers_json, special_number FROM draws ORDER BY draw_date DESC LIMIT 1").fetchone()
     if latest:
@@ -1226,45 +1233,44 @@ def cmd_show(args: argparse.Namespace) -> None:
 
     hot5 = picked_6[:5]
 
-   # ---------- 直接基于最近2期开奖主号统计生肖出现次数 ----------
-recent_zodiac = Counter()
-for draw in draws[-2:]:          # 只取最近2期
-    for n in draw:
-        for z, nums in ZODIAC_MAP.items():
-            if n in nums:
-                recent_zodiac[z] += 1
-                break
-if recent_zodiac:
-    sorted_zodiac = sorted(recent_zodiac.items(), key=lambda x: x[1], reverse=True)
-    top1 = sorted_zodiac[0][0]
-    top2 = sorted_zodiac[1][0] if len(sorted_zodiac) > 1 else "龙"
-else:
-    top1, top2 = "龙", "马"
+    # ---------- 直接基于最近2期开奖主号统计生肖出现次数 ----------
+    recent_zodiac = Counter()
+    for draw in draws[-2:]:          # 只取最近2期
+        for n in draw:
+            for z, nums in ZODIAC_MAP.items():
+                if n in nums:
+                    recent_zodiac[z] += 1
+                    break
+    if recent_zodiac:
+        sorted_zodiac = sorted(recent_zodiac.items(), key=lambda x: x[1], reverse=True)
+        top1 = sorted_zodiac[0][0]
+        top2 = sorted_zodiac[1][0] if len(sorted_zodiac) > 1 else "龙"
+    else:
+        top1, top2 = "龙", "马"
 
-# 计算命中率（基于最近2期）
-def zodiac_hit_rate(zod, limit=2):
-    hits = 0
-    for draw in draws[-limit:]:
-        if any(n in ZODIAC_MAP[zod] for n in draw):
-            hits += 1
-    return hits / limit * 100 if limit > 0 else 0
+    def zodiac_hit_rate(zod, limit=2):
+        hits = 0
+        for draw in draws[-limit:]:
+            if any(n in ZODIAC_MAP[zod] for n in draw):
+                hits += 1
+        return hits / limit * 100 if limit > 0 else 0
 
-rate1 = zodiac_hit_rate(top1, 2)
-rate2 = zodiac_hit_rate(top2, 2)
+    rate1 = zodiac_hit_rate(top1, 2)
+    rate2 = zodiac_hit_rate(top2, 2)
+
+    special_zod = get_zodiac(picked_special)
 
     next_issue_str = pending[0]['issue_no'] if pending else (next_issue_number(latest['issue_no']) if latest else "未知")
     print(f"📅 参考期号: {next_issue_str}")
     print("-" * 60)
-    print(f"🐉 最强生肖: {top1}  (近5期命中率 {rate1:.0f}%)")
-    print(f"🐉 次强生肖: {top2}  (近5期命中率 {rate2:.0f}%)")
+    print(f"🐉 最强生肖: {top1}  (近2期命中率 {rate1:.0f}%)")
+    print(f"🐉 次强生肖: {top2}  (近2期命中率 {rate2:.0f}%)")
     print("🎲 正码5个 (科学概率评估，基于最近6期):")
-
     for n in hot5:
         hits_6 = sum(1 for draw in draws if n in draw)
         low, high = wilson_interval(hits_6, len(draws))
         posterior = bayesian_posterior(hits_6, len(draws))
         print(f"      {n:02d} ({get_zodiac(n)})  ─ 威尔逊区间 [{low:.0f}%-{high:.0f}%]  后验概率 {posterior:.1f}%")
-
     print(f"🔮 特别号 (首选): {picked_special:02d} ({special_zod})")
 
     # ---------- 特别号6码推荐 ----------
@@ -1386,7 +1392,7 @@ rate2 = zodiac_hit_rate(top2, 2)
     # ---------- 智能投注方案（预算500元）----------
     print_betting_plan(hot5, top1, picked_special, top6_specials, best_combo, budget=500)
 
-    # ---------- 微信推送（温和玄学版）----------
+    # ---------- 微信推送 ----------
     push_lines = []
     push_lines.append(f"【香港六合彩·{next_issue_str}期推荐】")
     push_lines.append(f"今日{day_gan}{day_zhi}日 五行{day_wuxing} · 玄学权重{FENGSHUI_POWER*100:.0f}%")
@@ -1423,7 +1429,6 @@ rate2 = zodiac_hit_rate(top2, 2)
     send_pushplus_notification("香港六合彩预测", push_content)
 
     conn.close()
-
 
 def cmd_backtest(args: argparse.Namespace) -> None:
     conn = connect_db(args.db)
